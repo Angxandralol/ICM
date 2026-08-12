@@ -30,6 +30,7 @@ El sistema ICM está diseñado para el monitoreo automatizado de cambios en las 
 - [Instalación](#instalación)
     - [Configuración del Sistema](#configuración-del-sistema)
 - [Ejecución](#ejecución)
+- [Despliegue con Docker](#despliegue-con-docker)
 - [Mantenimiento](#mantenimiento)
     - [Programación de Tareas](#programación-de-tareas)
     - [Logs](#logs)
@@ -156,6 +157,50 @@ O si prefiere, puede levantar los servicios manualmente siguiendo estos pasos:
 ```bash
 fastapi run icm/business/api/app.py
 cd presentation && npm run start
+```
+
+# Despliegue con Docker
+El sistema también puede levantarse completamente con Docker Compose. Se orquestan 4 servicios:
+- `postgres`: base de datos PostgreSQL con volumen persistente.
+- `backend`: API del sistema (FastAPI/uvicorn).
+- `frontend`: interfaz web (Next.js).
+- `nginx`: proxy inverso que expone un único puerto (80 por defecto), enrutando `/api/*` hacia el backend y el resto hacia el frontend.
+
+## Requisitos
+- Docker y Docker Compose (plugin `docker compose`).
+
+## Configuración
+Copia la plantilla de variables de entorno para Docker y ajusta los valores:
+```bash
+cp .env.docker.example .env.docker
+```
+
+Variables disponibles en `.env.docker`:
+```bash
+POSTGRES_USER=icm_user
+POSTGRES_PASSWORD=changeme
+POSTGRES_DB=icm_db
+SECRET_KEY=changeme
+HOST_FRONTEND=http://localhost
+NEXT_PUBLIC_API_URL=http://localhost/api
+HTTP_PORT=80
+```
+> *Nota*: `NEXT_PUBLIC_API_URL` y `HOST_FRONTEND` deben apuntar al host/IP público donde estará accesible el sistema (por ejemplo, la IP retornada por `make ip`).
+
+Este archivo `.env.docker` es independiente de `.env`/`.env.production` usados fuera de Docker; el contenedor del backend genera su propio `.env.production` interno a partir de estas variables al iniciar.
+
+Al igual que en la instalación manual, se debe definir el archivo `data/sources/devices.csv` con los equipos a monitorear, y el `system.json` con la configuración de credenciales SNMP (ambos persisten en el host mediante volúmenes).
+
+## Comandos
+```bash
+make setup     # Prepara directorios/archivos, construye las imágenes y levanta el sistema
+make start     # Levanta el sistema (sin reconstruir imágenes)
+make stop      # Detiene el sistema
+make build     # Reconstruye las imágenes y reinicia el sistema
+make updater   # Ejecuta las consultas SNMP dentro del contenedor del backend
+make logs      # Sigue los logs de todos los contenedores
+make ps        # Muestra el estado de los contenedores
+make clean     # Detiene el sistema y elimina los volúmenes (incluye datos de PostgreSQL)
 ```
 
 # Mantenimiento

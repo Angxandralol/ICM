@@ -1,0 +1,16 @@
+presentation
+docs
+.git
+.venv
+.next
+node_modules
+data
+icm.egg-info
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+system.json
+Makefile
+LICENSE
