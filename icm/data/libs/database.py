@@ -1,126 +1,113 @@
-import psycopg2
-from psycopg2 import sql
-from icm.data.constants.database import TableNames
-from icm.data.schemas.assignment import ASSIGNMENT_SCHEMA
-from icm.data.schemas.interface import INTERFACE_SCHEMA
-from icm.data.schemas.change import CHANGE_SCHEMA
-from icm.data.schemas.user import USER_SCHEMA
+from contextlib import contextmanager
+from typing import Iterator
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.orm import Session, sessionmaker
+
+from icm.data.base import Base
 from icm.utils import Configuration, log
+
+_DRIVER_NAME = "postgresql+psycopg2"
+_MAINTENANCE_DATABASE = "postgres"
 
 
 class Database:
-    """Class to manage database connection."""
+    """Owns the single SQLAlchemy engine of the process.
 
-    _uri: str
-    _connection: psycopg2.extensions.connection
-    _cursor: psycopg2.extensions.cursor
-    connected: bool = False
+    Design pattern: Singleton (one engine/pool per process, mirroring
+    `icm.utils.config.Configuration`) plus Unit of Work (`session()`), so a
+    controller can group several related writes in one transaction instead
+    of each query opening and closing its own connection.
+    """
+
+    _instance: "Database | None" = None
+    _engine: Engine
+    _session_factory: sessionmaker
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self, uri: str | None = None):
-        if not uri:
-            uri = self._get_uri()
-        self._uri = uri
-        self.open_connection()
+        if hasattr(self, "_initialized"):
+            return
+        self._initialized = True
+        self._uri = uri or Configuration().uri_postgres
+        self._engine = create_engine(self._as_driver_url(self._uri), pool_pre_ping=True)
+        self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
-    def _get_uri(self) -> str:
-        """Get uri of database from configuration."""
-        configuration = Configuration()
-        return configuration.uri_postgres
+    @staticmethod
+    def _as_driver_url(uri: str) -> str:
+        return (
+            make_url(uri)
+            .set(drivername=_DRIVER_NAME)
+            .render_as_string(hide_password=False)
+        )
 
-    def _check_database(self, uri: str) -> bool:
-        """Check if the database exists."""
+    @staticmethod
+    def _quote_identifier(identifier: str) -> str:
+        return '"' + identifier.replace('"', '""') + '"'
+
+    def ensure_database_exists(self) -> bool:
+        """Create the target database if it doesn't exist yet.
+
+        Meant to run once, from the `icm database --start` CLI flow. It must
+        not run on every connection: creating a database requires connecting
+        to Postgres' own maintenance database (`postgres`) first, which is
+        wasted work on every request.
+        """
+        url = make_url(self._as_driver_url(self._uri))
+        target_db = url.database
+        maintenance_engine = create_engine(
+            url.set(database=_MAINTENANCE_DATABASE), isolation_level="AUTOCOMMIT"
+        )
         try:
-            name_db = uri.split("/")[-1]
-            uri_base = f"postgres://{uri.split('/')[-2]}/postgres"
-            connection = psycopg2.connect(uri_base)
-            connection.autocommit = True
-            cursor = connection.cursor()
-            cursor.execute(
-                """
-                    SELECT
-                        1
-                    FROM
-                        pg_database
-                    WHERE
-                        datname = %s
-                """,
-                (name_db,),
-            )
-            status = cursor.fetchone() is not None
-            cursor.close()
-            connection.close()
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"PostgreSQL database error. Failed to check database.{error}")
-            return False
-        else:
-            return status
-
-    def _create_database(self, uri: str) -> bool:
-        """Create the database (if not exists)."""
-        try:
-            name_db = uri.split("/")[-1].strip()
-            uri_base = f"postgres://{uri.split('/')[-2]}/postgres"
-            connection = psycopg2.connect(uri_base)
-            connection.autocommit = True
-            cursor = connection.cursor()
-            cursor.execute(
-                sql.SQL(
-                    """
-                        CREATE DATABASE {db}
-                    """
-                ).format(db=sql.Identifier(name_db))
-            )
-            cursor.close()
-            connection.close()
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"PostgreSQL database Error. Failed to create database. {error}")
-            return False
-        else:
-            log.info("Create database successfully.")
+            with maintenance_engine.connect() as connection:
+                exists = (
+                    connection.execute(
+                        text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                        {"name": target_db},
+                    ).scalar()
+                    is not None
+                )
+                if not exists:
+                    connection.execute(
+                        text(f"CREATE DATABASE {self._quote_identifier(target_db)}")
+                    )
+                    log.info(f"Database '{target_db}' created successfully.")
             return True
-
-    def open_connection(self) -> None:
-        """Open connection to database."""
-        try:
-            if not self._check_database(self._uri):
-                self._create_database(self._uri)
-            self._connection = psycopg2.connect(self._uri)
-            self._cursor = self._connection.cursor()
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
-                f"PostgreSQL database error. Failed to open connection to database. {error}"
+                f"PostgreSQL database error. Failed to ensure database exists. {error}"
             )
-        else:
-            self.connected = True
+            return False
+        finally:
+            maintenance_engine.dispose()
 
-    def get_connection(self) -> psycopg2.extensions.connection:
-        """Get connection to database."""
-        return self._connection
+    @contextmanager
+    def session(self) -> Iterator[Session]:
+        """Unit of work: commits on success, rolls back on error, always closes.
 
-    def get_cursor(self) -> psycopg2.extensions.cursor:
-        """Get cursor to database."""
-        return self._cursor
-
-    def close_connection(self) -> None:
-        """Close connection to database."""
-        if self.connected:
-            self._cursor.close()
-            self._connection.close()
-            self.connected = False
+        Use this to group every write that must succeed or fail together,
+        e.g. inserting an assignment and marking its change as assigned.
+        """
+        session = self._session_factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def initialize(self) -> bool:
-        """Create all tables of database."""
+        """Create every table declared in the ORM schemas."""
         try:
-            cursor = self._cursor
-            cursor.execute(USER_SCHEMA)
-            cursor.execute(INTERFACE_SCHEMA)
-            cursor.execute(ASSIGNMENT_SCHEMA)
-            cursor.execute(CHANGE_SCHEMA)
-            self._connection.commit()
-            self.close_connection()
+            Base.metadata.create_all(self._engine)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"PostgreSQL database error. Failed to migrate database. {error}")
@@ -129,16 +116,10 @@ class Database:
             log.info("Migration database successfully.")
             return True
 
-    def drop(self) -> None:
-        """Drop data and tables of database."""
+    def drop(self) -> bool:
+        """Drop every table declared in the ORM schemas."""
         try:
-            cursor = self._cursor
-            cursor.execute(f"DROP TABLE IF EXISTS {TableNames.CHANGES}")
-            cursor.execute(f"DROP TABLE IF EXISTS {TableNames.ASSIGNMENTS}")
-            cursor.execute(f"DROP TABLE IF EXISTS {TableNames.USERS}")
-            cursor.execute(f"DROP TABLE IF EXISTS {TableNames.INTERFACES}")
-            self._connection.commit()
-            self.close_connection()
+            Base.metadata.drop_all(self._engine)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
@@ -148,4 +129,3 @@ class Database:
         else:
             log.info("Rollback database successfully.")
             return True
-

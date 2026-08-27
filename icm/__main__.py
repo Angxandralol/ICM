@@ -65,7 +65,7 @@ def database(start: bool, drop: bool):
         rich.print(
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [gold1]Creating database tables..."
         )
-        status = database.initialize()
+        status = database.ensure_database_exists() and database.initialize()
         if status:
             rich.print(
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [green3]Database tables created"

@@ -29,6 +29,7 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "python-multipart>=0.0.20",
     "rich>=14.0.0",
+    "SQLAlchemy>=2.0.0",
     "uvicorn>=0.34.3"
 ]
 urls = { Homepage = "https://github.com/xanv754/Interface-Change-Monitor" }
@@ -37,7 +38,10 @@ urls = { Homepage = "https://github.com/xanv754/Interface-Change-Monitor" }
 icm = "icm.__main__:cli"
 
 [project.optional-dependencies]
-dev = ["black"]
+dev = ["black", "pytest>=8.0.0"]
 
 [tool.setuptools]
 packages = ["icm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

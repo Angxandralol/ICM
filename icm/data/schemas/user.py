@@ -1,18 +1,35 @@
-from icm.constants import RoleTypes, UserStatusTypes, UserField
+from datetime import date
+
+from sqlalchemy import CheckConstraint, Date, String, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from icm.constants import RoleTypes, UserField, UserStatusTypes
+from icm.data.base import Base
 from icm.data.constants.database import TableNames
 
 
-USER_SCHEMA = f"""
-    CREATE TABLE IF NOT EXISTS {TableNames.USERS} (
-        {UserField.USERNAME} VARCHAR(20) PRIMARY KEY,
-        {UserField.PASSWORD} VARCHAR(100) NOT NULL,
-        {UserField.NAME} VARCHAR(50) NOT NULL,
-        {UserField.LASTNAME} VARCHAR(50) NOT NULL,
-        {UserField.STATUS} VARCHAR(8) NOT NULL,
-        {UserField.ROLE} VARCHAR(6) NOT NULL,
-        {UserField.CREATED_AT} DATE DEFAULT CURRENT_DATE,
-        {UserField.UPDATED_AT} DATE DEFAULT NULL,
-        CONSTRAINT {TableNames.USERS}_status CHECK ({UserField.STATUS} IN ('{UserStatusTypes.ACTIVE}', '{UserStatusTypes.INACTIVE}', '{UserStatusTypes.DELETED}')),
-        CONSTRAINT {TableNames.USERS}_role CHECK ({UserField.ROLE} IN ('{RoleTypes.ADMIN}', '{RoleTypes.ROOT}', '{RoleTypes.USER}', '{RoleTypes.SOPORT}'))
+class UserSchema(Base):
+    """ORM schema of the `users` table."""
+
+    __tablename__ = TableNames.USERS
+    __table_args__ = (
+        CheckConstraint(
+            f"{UserField.STATUS} IN ('{UserStatusTypes.ACTIVE}', "
+            f"'{UserStatusTypes.INACTIVE}', '{UserStatusTypes.DELETED}')",
+            name=f"{TableNames.USERS}_status",
+        ),
+        CheckConstraint(
+            f"{UserField.ROLE} IN ('{RoleTypes.ADMIN}', '{RoleTypes.ROOT}', "
+            f"'{RoleTypes.USER}', '{RoleTypes.SOPORT}')",
+            name=f"{TableNames.USERS}_role",
+        ),
     )
-"""
+
+    username: Mapped[str] = mapped_column(String(20), primary_key=True)
+    password: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    lastname: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[date | None] = mapped_column(Date, server_default=func.current_date())
+    updated_at: Mapped[date | None] = mapped_column(Date, nullable=True, default=None)

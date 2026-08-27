@@ -28,7 +28,7 @@ class UserField:
 class AssignmentField:
     OLD_INTERFACE_ID = "old_interface_id"
     CURRENT_INTERFACE_ID = "current_interface_id"
-    USERNAME = "user_id"
+    USERNAME = "username"
     ASSIGN_BY = "assign_by"
     TYPE_STATUS = "type_status"
     CREATED_AT = "created_at"
