@@ -1,5 +1,12 @@
+import pandas as pd
 from typing import Tuple, List
-from icm.access import AssignmentQuery, ChangeQuery, UserQuery, AssignmentModel
+from icm.access import (
+    AssignmentQuery,
+    ChangeQuery,
+    UserQuery,
+    UpdateChangeModel,
+    UpdateAssignmentModel as AccessUpdateAssignmentModel,
+)
 from icm.constants import AssignmentStatusTypes
 from icm.utils import OperationData, Validate, log
 from icm.constants.fields import ChangeField
@@ -9,7 +16,6 @@ from icm.business.models.assignment import (
     ReassignmentModel,
     UpdateAssignmentModel,
 )
-from icm.business.models.change import UpdateChangeModel
 
 
 class AssignmentController:
@@ -26,8 +32,8 @@ class AssignmentController:
         """
         try:
             assignment_query = AssignmentQuery()
-            buffer = OperationData.transform_to_buffer(assignments)
-            status_operation = assignment_query.insert(data=buffer)
+            data = pd.DataFrame([assignment.model_dump() for assignment in assignments])
+            status_operation = assignment_query.insert(data=data)
             if not status_operation:
                 raise Exception()
             changes: List[UpdateChangeModel] = []
@@ -116,8 +122,8 @@ class AssignmentController:
                         )
                     )
                 start += count
-            buffer = OperationData.transform_to_buffer(new_assignments)
-            status_operation = assign_query.insert(data=buffer)
+            data = pd.DataFrame([assignment.model_dump() for assignment in new_assignments])
+            status_operation = assign_query.insert(data=data)
             if not status_operation:
                 raise Exception()
             update_changes: List[UpdateChangeModel] = [
@@ -152,10 +158,10 @@ class AssignmentController:
         """
         try:
             query = AssignmentQuery()
-            list_assingments: AssignmentModel = []
+            list_assingments: list[AccessUpdateAssignmentModel] = []
             for assignment in assignments:
                 list_assingments.append(
-                    AssignmentModel(
+                    AccessUpdateAssignmentModel(
                         old_interface_id=assignment.old_interface_id,
                         current_interface_id=assignment.current_interface_id,
                         username=username,

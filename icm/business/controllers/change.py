@@ -1,10 +1,9 @@
 from typing import Tuple, List
 from math import ceil
 from pandas import DataFrame
-from icm.access import ChangeQuery
-from icm.utils import OperationData, HEADER_RESPONSE_INTERFACES_CHANGES, log
+from icm.access import ChangeQuery, UpdateChangeModel
+from icm.utils import HEADER_RESPONSE_INTERFACES_CHANGES, log
 from icm.business.libs.code import ResponseCode
-from icm.business.models.change import UpdateChangeModel
 from icm.constants.fields import ChangeField
 
 
@@ -29,11 +28,10 @@ class ChangeController:
                     message="Invalid header of data interfaces with changes to insert",
                 )
             data[ChangeField.ASSIGNED] = None
-            buffer = OperationData.transform_to_buffer(data)
             status_operation = ChangeController.delete_changes()
             if not status_operation:
                 raise Exception()
-            status_operation = query.insert(data=buffer)
+            status_operation = query.insert(data=data)
             if not status_operation:
                 raise Exception()
             return ResponseCode(status=201)

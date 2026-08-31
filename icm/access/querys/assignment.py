@@ -1,28 +1,31 @@
 import pandas as pd
-from datetime import datetime
-from io import StringIO
+from datetime import date
 from typing import List
-from icm.constants import InterfaceField, UserField, AssignmentField, AssignmentCompleteField, StatisticsField, AssignmentStatusTypes
-from icm.data import TableNames
+from sqlalchemy import and_, case, desc, func, insert, select, update
+from sqlalchemy.orm import joinedload
+from icm.constants import AssignmentStatusTypes, StatisticsField
+from icm.data import AssignmentSchema, UserSchema
 from icm.utils import log
 from icm.access.models.assignment import ReassignmentModel, UpdateAssignmentModel, StatisticsModel
 from icm.access.querys.query import Query
 from icm.access.utils.adapter import AdapterAssignment
+from icm.access.utils.frame import dataframe_to_rows
 
 
 class AssignmentQuery(Query):
     """Class to manage assignment query."""
 
-    def __init__(self, uri: str | None = None):
-        super().__init__(uri=uri)
+    def __init__(self):
+        super().__init__()
 
-    def insert(self, data: StringIO) -> bool:
-        """Insert assignment in database.
-        
+    def insert(self, data: pd.DataFrame) -> bool:
+        """Insert assignments in database.
+
         Parameters
         ----------
-        data : StringIO
-            Data to insert.
+        data : pd.DataFrame
+            Assignments to insert. Columns must match `AssignmentSchema`'s
+            attribute names.
 
         Returns
         -------
@@ -30,84 +33,57 @@ class AssignmentQuery(Query):
             True if the data was inserted successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.copy_from(
-                file=data, 
-                table=TableNames.ASSIGNMENTS,
-                sep=";",
-                columns=(
-                    AssignmentField.OLD_INTERFACE_ID.lower(),
-                    AssignmentField.CURRENT_INTERFACE_ID.lower(),
-                    AssignmentField.USERNAME.lower(),
-                    AssignmentField.ASSIGN_BY.lower(),
-                    AssignmentField.TYPE_STATUS.lower()
-                )
-            )
-            self.database.get_connection().commit()
-            self.database.close_connection()
+            rows = dataframe_to_rows(data)
+            with self.database.session() as session:
+                session.execute(insert(AssignmentSchema), rows)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Assignment query error. Failed to insert assignment. {error}")
             return False
         else:
             return True
-        
+
     def reassing(self, data: List[ReassignmentModel]) -> bool:
-        """Reassing assignment in database.
-        
+        """Reassing assignments in database.
+
         Parameters
         ----------
         data : List[ReassignmentModel]
-            Data to insert.
+            Data to reassign.
 
         Returns
         -------
         bool
-            True if the data was inserted successfully, False otherwise.
+            True if the data was updated successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            for assignment in data:
-                cursor.execute(
-                    f"""
-                        UPDATE 
-                            {TableNames.ASSIGNMENTS}
-                        SET 
-                            {AssignmentField.USERNAME} = %s,
-                            {AssignmentField.ASSIGN_BY} = %s,
-                            {AssignmentField.TYPE_STATUS} = %s,
-                            {AssignmentField.CREATED_AT} = CURRENT_DATE,
-                            {AssignmentField.UPDATED_AT} = NULL
-                        WHERE 
-                            {AssignmentField.OLD_INTERFACE_ID} = %s AND
-                            {AssignmentField.CURRENT_INTERFACE_ID} = %s AND
-                            {AssignmentField.USERNAME} = %s
-                    """,
-                    (
-                        assignment.new_username,
-                        assignment.assign_by.lower(),
-                        AssignmentStatusTypes.PENDING,
-                        assignment.old_interface_id,
-                        assignment.current_interface_id,
-                        assignment.old_username
+            with self.database.session() as session:
+                for assignment in data:
+                    session.execute(
+                        update(AssignmentSchema)
+                        .where(
+                            AssignmentSchema.old_interface_id == assignment.old_interface_id,
+                            AssignmentSchema.current_interface_id == assignment.current_interface_id,
+                            AssignmentSchema.username == assignment.old_username,
+                        )
+                        .values(
+                            username=assignment.new_username,
+                            assign_by=assignment.assign_by.lower(),
+                            type_status=AssignmentStatusTypes.PENDING,
+                            created_at=func.current_date(),
+                            updated_at=None,
+                        )
                     )
-                )
-                self.database.get_connection().commit()
-            self.database.close_connection()
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Assignment query error. Failed to insert assignment. {error}")
             return False
         else:
             return True
-        
+
     def update_status(self, data: List[UpdateAssignmentModel]) -> bool:
         """Update assignments in database.
-        
+
         Parameters
         ----------
         data : List[UpdateAssignmentModel]
@@ -119,41 +95,30 @@ class AssignmentQuery(Query):
             True if the data was updated successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            for assignment in data:
-                cursor.execute(
-                    f"""
-                        UPDATE 
-                            {TableNames.ASSIGNMENTS}
-                        SET 
-                            {AssignmentField.TYPE_STATUS} = %s,
-                            {AssignmentField.UPDATED_AT} = CURRENT_DATE
-                        WHERE 
-                            {AssignmentField.OLD_INTERFACE_ID} = %s AND
-                            {AssignmentField.CURRENT_INTERFACE_ID} = %s AND
-                            {AssignmentField.USERNAME} = %s
-                    """,
-                    (
-                        assignment.type_status,
-                        assignment.old_interface_id,
-                        assignment.current_interface_id,
-                        assignment.username
+            with self.database.session() as session:
+                for assignment in data:
+                    session.execute(
+                        update(AssignmentSchema)
+                        .where(
+                            AssignmentSchema.old_interface_id == assignment.old_interface_id,
+                            AssignmentSchema.current_interface_id == assignment.current_interface_id,
+                            AssignmentSchema.username == assignment.username,
+                        )
+                        .values(
+                            type_status=assignment.type_status,
+                            updated_at=func.current_date(),
+                        )
                     )
-                )
-                self.database.get_connection().commit()
-            self.database.close_connection()
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Assignment query error. Failed to update assignment. {error}")
             return False
         else:
             return True
-        
+
     def get_all_by_status(self, status: str) -> pd.DataFrame:
         """Get all assignments by status.
-        
+
         Parameters
         ----------
         status : str
@@ -165,65 +130,26 @@ class AssignmentQuery(Query):
             DataFrame with all assignments.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    SELECT
-                        old.{InterfaceField.ID} as {AssignmentCompleteField.ID_OLD},
-                        old.{InterfaceField.IP} as {AssignmentCompleteField.IP_OLD},
-                        old.{InterfaceField.COMMUNITY} as {AssignmentCompleteField.COMMUNITY_OLD},
-                        old.{InterfaceField.SYSNAME} as {AssignmentCompleteField.SYSNAME_OLD},
-                        old.{InterfaceField.IFINDEX} as {AssignmentCompleteField.IFINDEX_OLD},
-                        old.{InterfaceField.IFNAME} as {AssignmentCompleteField.IFNAME_OLD},
-                        old.{InterfaceField.IFDESCR} as {AssignmentCompleteField.IFDESCR_OLD},
-                        old.{InterfaceField.IFALIAS} as {AssignmentCompleteField.IFALIAS_OLD},
-                        old.{InterfaceField.IFHIGHSPEED} as {AssignmentCompleteField.IFHIGHSPEED_OLD},
-                        old.{InterfaceField.IFOPERSTATUS} as {AssignmentCompleteField.IFOPERSTATUS_OLD},
-                        old.{InterfaceField.IFADMINSTATUS} as {AssignmentCompleteField.IFADMINSTATUS_OLD},
-                        new.{InterfaceField.ID} as {AssignmentCompleteField.ID_NEW},
-                        new.{InterfaceField.IP} as {AssignmentCompleteField.IP_NEW},
-                        new.{InterfaceField.COMMUNITY} as {AssignmentCompleteField.COMMUNITY_NEW},
-                        new.{InterfaceField.SYSNAME} as {AssignmentCompleteField.SYSNAME_NEW},
-                        new.{InterfaceField.IFINDEX} as {AssignmentCompleteField.IFINDEX_NEW},
-                        new.{InterfaceField.IFNAME} as {AssignmentCompleteField.IFNAME_NEW},
-                        new.{InterfaceField.IFDESCR} as {AssignmentCompleteField.IFDESCR_NEW},
-                        new.{InterfaceField.IFALIAS} as {AssignmentCompleteField.IFALIAS_NEW},
-                        new.{InterfaceField.IFHIGHSPEED} as {AssignmentCompleteField.IFHIGHSPEED_NEW},
-                        new.{InterfaceField.IFOPERSTATUS} as {AssignmentCompleteField.IFOPERSTATUS_NEW},
-                        new.{InterfaceField.IFADMINSTATUS} as {AssignmentCompleteField.IFADMINSTATUS_NEW},
-                        u.{UserField.USERNAME} as {AssignmentCompleteField.USERNAME},
-                        u.{UserField.NAME} as {AssignmentCompleteField.NAME},
-                        u.{UserField.LASTNAME} as {AssignmentCompleteField.LASTNAME},
-                        a.{AssignmentField.ASSIGN_BY} as {AssignmentCompleteField.ASSIGN_BY},
-                        a.{AssignmentField.TYPE_STATUS} as {AssignmentCompleteField.TYPE_STATUS},
-                        a.{AssignmentField.CREATED_AT} as {AssignmentCompleteField.CREATED_AT},
-                        a.{AssignmentField.UPDATED_AT} as {AssignmentCompleteField.UPDATED_AT}
-                    FROM
-                        {TableNames.ASSIGNMENTS} a
-                    JOIN 
-                        {TableNames.INTERFACES} old ON old.{InterfaceField.ID} = a.{AssignmentField.OLD_INTERFACE_ID}
-                    JOIN 
-                        {TableNames.INTERFACES} new ON new.{InterfaceField.ID} = a.{AssignmentField.CURRENT_INTERFACE_ID}
-                    JOIN
-                        {TableNames.USERS} u ON u.{UserField.USERNAME} = a.{AssignmentField.USERNAME}
-                    WHERE
-                        {AssignmentField.TYPE_STATUS} = %s
-                """,
-                (status,)
-            )
-            response = cursor.fetchall()
-            self.database.close_connection()
-            return AdapterAssignment.response(response)
+            with self.database.session() as session:
+                rows = (
+                    session.query(AssignmentSchema)
+                    .options(
+                        joinedload(AssignmentSchema.old_interface),
+                        joinedload(AssignmentSchema.current_interface),
+                        joinedload(AssignmentSchema.user),
+                    )
+                    .filter(AssignmentSchema.type_status == status)
+                    .all()
+                )
+                return AdapterAssignment.response(rows)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Assignment query error. Failed to get assignments by status. {error}")
             return pd.DataFrame()
-        
+
     def assigned_by_status(self, username: str, status: str) -> pd.DataFrame:
         """Get all assignments of a user by status.
-        
+
         Parameters
         ----------
         username : str
@@ -237,66 +163,31 @@ class AssignmentQuery(Query):
             DataFrame with all assignments.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    SELECT
-                        old.{InterfaceField.ID} as {AssignmentCompleteField.ID_OLD},
-                        old.{InterfaceField.IP} as {AssignmentCompleteField.IP_OLD},
-                        old.{InterfaceField.COMMUNITY} as {AssignmentCompleteField.COMMUNITY_OLD},
-                        old.{InterfaceField.SYSNAME} as {AssignmentCompleteField.SYSNAME_OLD},
-                        old.{InterfaceField.IFINDEX} as {AssignmentCompleteField.IFINDEX_OLD},
-                        old.{InterfaceField.IFNAME} as {AssignmentCompleteField.IFNAME_OLD},
-                        old.{InterfaceField.IFDESCR} as {AssignmentCompleteField.IFDESCR_OLD},
-                        old.{InterfaceField.IFALIAS} as {AssignmentCompleteField.IFALIAS_OLD},
-                        old.{InterfaceField.IFHIGHSPEED} as {AssignmentCompleteField.IFHIGHSPEED_OLD},
-                        old.{InterfaceField.IFOPERSTATUS} as {AssignmentCompleteField.IFOPERSTATUS_OLD},
-                        old.{InterfaceField.IFADMINSTATUS} as {AssignmentCompleteField.IFADMINSTATUS_OLD},
-                        new.{InterfaceField.ID} as {AssignmentCompleteField.ID_NEW},
-                        new.{InterfaceField.IP} as {AssignmentCompleteField.IP_NEW},
-                        new.{InterfaceField.COMMUNITY} as {AssignmentCompleteField.COMMUNITY_NEW},
-                        new.{InterfaceField.SYSNAME} as {AssignmentCompleteField.SYSNAME_NEW},
-                        new.{InterfaceField.IFINDEX} as {AssignmentCompleteField.IFINDEX_NEW},
-                        new.{InterfaceField.IFNAME} as {AssignmentCompleteField.IFNAME_NEW},
-                        new.{InterfaceField.IFDESCR} as {AssignmentCompleteField.IFDESCR_NEW},
-                        new.{InterfaceField.IFALIAS} as {AssignmentCompleteField.IFALIAS_NEW},
-                        new.{InterfaceField.IFHIGHSPEED} as {AssignmentCompleteField.IFHIGHSPEED_NEW},
-                        new.{InterfaceField.IFOPERSTATUS} as {AssignmentCompleteField.IFOPERSTATUS_NEW},
-                        new.{InterfaceField.IFADMINSTATUS} as {AssignmentCompleteField.IFADMINSTATUS_NEW},
-                        u.{UserField.USERNAME} as {AssignmentCompleteField.USERNAME},
-                        u.{UserField.NAME} as {AssignmentCompleteField.NAME},
-                        u.{UserField.LASTNAME} as {AssignmentCompleteField.LASTNAME},
-                        a.{AssignmentField.ASSIGN_BY} as {AssignmentCompleteField.ASSIGN_BY},
-                        a.{AssignmentField.TYPE_STATUS} as {AssignmentCompleteField.TYPE_STATUS},
-                        a.{AssignmentField.CREATED_AT} as {AssignmentCompleteField.CREATED_AT},
-                        a.{AssignmentField.UPDATED_AT} as {AssignmentCompleteField.UPDATED_AT}
-                    FROM
-                        {TableNames.ASSIGNMENTS} a
-                    JOIN 
-                        {TableNames.INTERFACES} old ON old.{InterfaceField.ID} = a.{AssignmentField.OLD_INTERFACE_ID}
-                    JOIN 
-                        {TableNames.INTERFACES} new ON new.{InterfaceField.ID} = a.{AssignmentField.CURRENT_INTERFACE_ID}
-                    JOIN
-                        {TableNames.USERS} u ON u.{UserField.USERNAME} = a.{AssignmentField.USERNAME}
-                    WHERE
-                        {AssignmentField.USERNAME} = %s AND
-                        {AssignmentField.TYPE_STATUS} = %s
-                """,
-                (username, status)
-            )
-            response = cursor.fetchall()
-            self.database.close_connection()
-            return AdapterAssignment.response(response)
+            with self.database.session() as session:
+                rows = (
+                    session.query(AssignmentSchema)
+                    .options(
+                        joinedload(AssignmentSchema.old_interface),
+                        joinedload(AssignmentSchema.current_interface),
+                        joinedload(AssignmentSchema.user),
+                    )
+                    .filter(
+                        AssignmentSchema.username == username,
+                        AssignmentSchema.type_status == status,
+                    )
+                    .all()
+                )
+                return AdapterAssignment.response(rows)
         except Exception as error:
             error = str(error).strip().capitalize()
-            log.error(f"Assignment query error. Failed to get assignments by username and status. {error}")
+            log.error(
+                f"Assignment query error. Failed to get assignments by username and status. {error}"
+            )
             return pd.DataFrame()
-        
+
     def completed_by_month(self, username: str, date: int) -> pd.DataFrame:
         """Get all assignments completed of a user by filter month.
-        
+
         Parameters
         ----------
         username : str
@@ -310,91 +201,55 @@ class AssignmentQuery(Query):
             DataFrame with all assignments.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    SELECT
-                        old.{InterfaceField.ID} as {AssignmentCompleteField.ID_OLD},
-                        old.{InterfaceField.IP} as {AssignmentCompleteField.IP_OLD},
-                        old.{InterfaceField.COMMUNITY} as {AssignmentCompleteField.COMMUNITY_OLD},
-                        old.{InterfaceField.SYSNAME} as {AssignmentCompleteField.SYSNAME_OLD},
-                        old.{InterfaceField.IFINDEX} as {AssignmentCompleteField.IFINDEX_OLD},
-                        old.{InterfaceField.IFNAME} as {AssignmentCompleteField.IFNAME_OLD},
-                        old.{InterfaceField.IFDESCR} as {AssignmentCompleteField.IFDESCR_OLD},
-                        old.{InterfaceField.IFALIAS} as {AssignmentCompleteField.IFALIAS_OLD},
-                        old.{InterfaceField.IFHIGHSPEED} as {AssignmentCompleteField.IFHIGHSPEED_OLD},
-                        old.{InterfaceField.IFOPERSTATUS} as {AssignmentCompleteField.IFOPERSTATUS_OLD},
-                        old.{InterfaceField.IFADMINSTATUS} as {AssignmentCompleteField.IFADMINSTATUS_OLD},
-                        new.{InterfaceField.ID} as {AssignmentCompleteField.ID_NEW},
-                        new.{InterfaceField.IP} as {AssignmentCompleteField.IP_NEW},
-                        new.{InterfaceField.COMMUNITY} as {AssignmentCompleteField.COMMUNITY_NEW},
-                        new.{InterfaceField.SYSNAME} as {AssignmentCompleteField.SYSNAME_NEW},
-                        new.{InterfaceField.IFINDEX} as {AssignmentCompleteField.IFINDEX_NEW},
-                        new.{InterfaceField.IFNAME} as {AssignmentCompleteField.IFNAME_NEW},
-                        new.{InterfaceField.IFDESCR} as {AssignmentCompleteField.IFDESCR_NEW},
-                        new.{InterfaceField.IFALIAS} as {AssignmentCompleteField.IFALIAS_NEW},
-                        new.{InterfaceField.IFHIGHSPEED} as {AssignmentCompleteField.IFHIGHSPEED_NEW},
-                        new.{InterfaceField.IFOPERSTATUS} as {AssignmentCompleteField.IFOPERSTATUS_NEW},
-                        new.{InterfaceField.IFADMINSTATUS} as {AssignmentCompleteField.IFADMINSTATUS_NEW},
-                        u.{UserField.USERNAME} as {AssignmentCompleteField.USERNAME},
-                        u.{UserField.NAME} as {AssignmentCompleteField.NAME},
-                        u.{UserField.LASTNAME} as {AssignmentCompleteField.LASTNAME},
-                        a.{AssignmentField.ASSIGN_BY} as {AssignmentCompleteField.ASSIGN_BY},
-                        a.{AssignmentField.TYPE_STATUS} as {AssignmentCompleteField.TYPE_STATUS},
-                        a.{AssignmentField.CREATED_AT} as {AssignmentCompleteField.CREATED_AT},
-                        a.{AssignmentField.UPDATED_AT} as {AssignmentCompleteField.UPDATED_AT}
-                    FROM
-                        {TableNames.ASSIGNMENTS} a
-                    JOIN 
-                        {TableNames.INTERFACES} old ON old.{InterfaceField.ID} = a.{AssignmentField.OLD_INTERFACE_ID}
-                    JOIN 
-                        {TableNames.INTERFACES} new ON new.{InterfaceField.ID} = a.{AssignmentField.CURRENT_INTERFACE_ID}
-                    JOIN
-                        {TableNames.USERS} u ON u.{UserField.USERNAME} = a.{AssignmentField.USERNAME}
-                    WHERE
-                        {AssignmentField.USERNAME} = %s AND
-                        {AssignmentField.TYPE_STATUS} != '{AssignmentStatusTypes.PENDING}' AND
-                        TO_CHAR(a.{AssignmentField.CREATED_AT}, 'YYYY-MM') = %s
-                """,
-                (username, date)
-            )
-            response = cursor.fetchall()
-            self.database.close_connection()
-            return AdapterAssignment.response(response)
+            with self.database.session() as session:
+                rows = (
+                    session.query(AssignmentSchema)
+                    .options(
+                        joinedload(AssignmentSchema.old_interface),
+                        joinedload(AssignmentSchema.current_interface),
+                        joinedload(AssignmentSchema.user),
+                    )
+                    .filter(
+                        AssignmentSchema.username == username,
+                        AssignmentSchema.type_status != AssignmentStatusTypes.PENDING,
+                        func.to_char(AssignmentSchema.created_at, "YYYY-MM") == date,
+                    )
+                    .all()
+                )
+                return AdapterAssignment.response(rows)
         except Exception as error:
             error = str(error).strip().capitalize()
-            log.error(f"Assignment query error. Failed to get assignments by username and month. {error}")
-            return pd.DataFrame()
-        
-    def date_available_to_consult_history(self) -> List[str]:
-        try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    SELECT DISTINCT 
-                        TO_CHAR({AssignmentField.CREATED_AT}, 'YYYY-MM') AS unique_date
-                    FROM 
-                        {TableNames.ASSIGNMENTS}
-                    ORDER BY 
-                        unique_date DESC;
-                """
+            log.error(
+                f"Assignment query error. Failed to get assignments by username and month. {error}"
             )
-            response = cursor.fetchall()
-            dates = []
-            for res in response:
-                dates.append(res[0])
-            self.database.close_connection()
-            return dates
+            return pd.DataFrame()
+
+    def date_available_to_consult_history(self) -> List[str]:
+        """Get every distinct month with at least one assignment.
+
+        Returns
+        -------
+        List[str]
+            Months (YYYY-MM) available to consult, most recent first.
+        """
+        try:
+            stmt = (
+                select(func.to_char(AssignmentSchema.created_at, "YYYY-MM").label("unique_date"))
+                .distinct()
+                .order_by(desc("unique_date"))
+            )
+            with self.database.session() as session:
+                return [row.unique_date for row in session.execute(stmt)]
         except Exception as error:
+            error = str(error).strip().capitalize()
+            log.error(
+                f"Assignment query error. Failed to get available dates to consult history. {error}"
+            )
             return []
-        
+
     def get_statistics(self, usernames: List[str]) -> List[StatisticsModel]:
         """Get statistics of assignments by a list of usernames.
-        
+
         Parameters
         ----------
         usernames : List[str]
@@ -406,58 +261,46 @@ class AssignmentQuery(Query):
             Statistics of assignments by username.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            responses = []
-            for username in usernames:
-                cursor.execute(
-                    f"""
-                        SELECT
-                            COUNT(
-                                CASE WHEN {AssignmentField.TYPE_STATUS} = '{AssignmentStatusTypes.PENDING}' AND
-                                a.{AssignmentField.CREATED_AT} = '{datetime.now().strftime("%Y-%m-%d")}' THEN 1 END
-                            ) AS {StatisticsField.TOTAL_PENDING_TODAY},
-                            COUNT(
-                                CASE WHEN {AssignmentField.TYPE_STATUS} = '{AssignmentStatusTypes.INSPECTED}' AND
-                                a.{AssignmentField.CREATED_AT} = '{datetime.now().strftime("%Y-%m-%d")}' THEN 1 END
-                            ) AS {StatisticsField.TOTAL_INSPECTED_TODAY},
-                            COUNT(
-                                CASE WHEN {AssignmentField.TYPE_STATUS} = '{AssignmentStatusTypes.REDISCOVERED}' AND
-                                a.{AssignmentField.CREATED_AT} = '{datetime.now().strftime("%Y-%m-%d")}' THEN 1 END
-                            ) AS {StatisticsField.TOTAL_REDISCOVERED_TODAY},
-                            COUNT(
-                                CASE WHEN {AssignmentField.TYPE_STATUS} = '{AssignmentStatusTypes.PENDING}' AND
-                                EXTRACT(MONTH FROM a.{AssignmentField.CREATED_AT}) = EXTRACT(MONTH FROM CURRENT_DATE) THEN 1 END
-                            ) AS {StatisticsField.TOTAL_PENDING_MONTH},
-                            COUNT(
-                                CASE WHEN {AssignmentField.TYPE_STATUS} = '{AssignmentStatusTypes.INSPECTED}' AND
-                                EXTRACT(MONTH FROM a.{AssignmentField.CREATED_AT}) = EXTRACT(MONTH FROM CURRENT_DATE) THEN 1 END
-                            ) AS {StatisticsField.TOTAL_INSPECTED_MONTH},
-                            COUNT(
-                                CASE WHEN {AssignmentField.TYPE_STATUS} = '{AssignmentStatusTypes.REDISCOVERED}' AND
-                                EXTRACT(MONTH FROM a.{AssignmentField.CREATED_AT}) = EXTRACT(MONTH FROM CURRENT_DATE) THEN 1 END
-                            ) AS {StatisticsField.TOTAL_REDISCOVERED_MONTH},
-                            u.{UserField.USERNAME} AS {StatisticsField.USERNAME},
-                            u.{UserField.NAME} AS {StatisticsField.NAME},
-                            u.{UserField.LASTNAME} AS {StatisticsField.LASTNAME}
-                        FROM
-                            {TableNames.ASSIGNMENTS} a
-                        JOIN
-                            {TableNames.USERS} u ON u.{UserField.USERNAME} = a.{AssignmentField.USERNAME}
-                        WHERE
-                            a.{AssignmentField.USERNAME} = %s
-                        GROUP BY
-                            u.{UserField.USERNAME},
-                            u.{UserField.NAME},
-                            u.{UserField.LASTNAME}
-                    """,
-                    (username,)
+            today = date.today()
+            same_month = func.extract("month", AssignmentSchema.created_at) == func.extract(
+                "month", func.current_date()
+            )
+
+            def count_of(status: str, period):
+                return func.count(case((and_(AssignmentSchema.type_status == status, period), 1)))
+
+            stmt = (
+                select(
+                    count_of(AssignmentStatusTypes.PENDING, AssignmentSchema.created_at == today).label(
+                        StatisticsField.TOTAL_PENDING_TODAY
+                    ),
+                    count_of(AssignmentStatusTypes.INSPECTED, AssignmentSchema.created_at == today).label(
+                        StatisticsField.TOTAL_INSPECTED_TODAY
+                    ),
+                    count_of(AssignmentStatusTypes.REDISCOVERED, AssignmentSchema.created_at == today).label(
+                        StatisticsField.TOTAL_REDISCOVERED_TODAY
+                    ),
+                    count_of(AssignmentStatusTypes.PENDING, same_month).label(
+                        StatisticsField.TOTAL_PENDING_MONTH
+                    ),
+                    count_of(AssignmentStatusTypes.INSPECTED, same_month).label(
+                        StatisticsField.TOTAL_INSPECTED_MONTH
+                    ),
+                    count_of(AssignmentStatusTypes.REDISCOVERED, same_month).label(
+                        StatisticsField.TOTAL_REDISCOVERED_MONTH
+                    ),
+                    UserSchema.username.label(StatisticsField.USERNAME),
+                    UserSchema.name.label(StatisticsField.NAME),
+                    UserSchema.lastname.label(StatisticsField.LASTNAME),
                 )
-                response = cursor.fetchone()
-                responses.append(response)
-            self.database.close_connection()
-            return AdapterAssignment.response_statistics(responses)
+                .select_from(AssignmentSchema)
+                .join(UserSchema, UserSchema.username == AssignmentSchema.username)
+                .where(AssignmentSchema.username.in_(usernames))
+                .group_by(UserSchema.username, UserSchema.name, UserSchema.lastname)
+            )
+            with self.database.session() as session:
+                rows = session.execute(stmt).mappings().all()
+                return AdapterAssignment.response_statistics(rows)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Assignment query error. Failed to get statistics. {error}")

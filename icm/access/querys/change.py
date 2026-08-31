@@ -1,26 +1,28 @@
 import pandas as pd
-from io import StringIO
-from icm.constants import UserField, ChangeField, ChangeAssignField
-from icm.data import TableNames
+from sqlalchemy import insert, update
+from sqlalchemy.orm import joinedload
+from icm.data import ChangeSchema
 from icm.utils import log
 from icm.access.models.changes import UpdateChangeModel
 from icm.access.querys.query import Query
 from icm.access.utils.adapter import AdapterChange
+from icm.access.utils.frame import dataframe_to_rows
 
 
 class ChangeQuery(Query):
     """Class to manage change query."""
 
-    def __init__(self, uri: str | None = None):
-        super().__init__(uri=uri)
+    def __init__(self):
+        super().__init__()
 
-    def insert(self, data: StringIO) -> bool:
-        """Insert change in database.
+    def insert(self, data: pd.DataFrame) -> bool:
+        """Insert changes in database.
 
         Parameters
         ----------
-        data : StringIO
-            Data to insert.
+        data : pd.DataFrame
+            Changes to insert. Columns must match `ChangeSchema`'s attribute
+            names.
 
         Returns
         -------
@@ -28,41 +30,9 @@ class ChangeQuery(Query):
             True if the data was inserted successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.copy_from(
-                file=data,
-                table=TableNames.CHANGES,
-                sep=";",
-                columns=(
-                    ChangeField.ID_OLD.lower(),
-                    ChangeField.IP_OLD.lower(),
-                    ChangeField.COMMUNITY_OLD.lower(),
-                    ChangeField.SYSNAME_OLD.lower(),
-                    ChangeField.IFINDEX_OLD.lower(),
-                    ChangeField.IFNAME_OLD.lower(),
-                    ChangeField.IFDESCR_OLD.lower(),
-                    ChangeField.IFALIAS_OLD.lower(),
-                    ChangeField.IFHIGHSPEED_OLD.lower(),
-                    ChangeField.IFOPERSTATUS_OLD.lower(),
-                    ChangeField.IFADMINSTATUS_OLD.lower(),
-                    ChangeField.ID_NEW.lower(),
-                    ChangeField.IP_NEW.lower(),
-                    ChangeField.COMMUNITY_NEW.lower(),
-                    ChangeField.SYSNAME_NEW.lower(),
-                    ChangeField.IFINDEX_NEW.lower(),
-                    ChangeField.IFNAME_NEW.lower(),
-                    ChangeField.IFDESCR_NEW.lower(),
-                    ChangeField.IFALIAS_NEW.lower(),
-                    ChangeField.IFHIGHSPEED_NEW.lower(),
-                    ChangeField.IFOPERSTATUS_NEW.lower(),
-                    ChangeField.IFADMINSTATUS_NEW.lower(),
-                    ChangeField.ASSIGNED.lower(),
-                ),
-            )
-            self.database.get_connection().commit()
-            self.database.close_connection()
+            rows = dataframe_to_rows(data)
+            with self.database.session() as session:
+                session.execute(insert(ChangeSchema), rows)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Change query error. Failed to insert changes. {error}")
@@ -71,56 +41,33 @@ class ChangeQuery(Query):
             return True
 
     def get_all(self, page: int = 1, page_size: int = 100) -> tuple[list[dict], int]:
+        """Get all changes, paginated.
+
+        Parameters
+        ----------
+        page : int
+            Page to retrieve, starting at 1.
+        page_size : int
+            Amount of changes per page.
+
+        Returns
+        -------
+        tuple[list[dict], int]
+            Changes of the requested page and the total amount of changes.
+        """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-
-            cursor.execute(f"SELECT COUNT(*) FROM {TableNames.CHANGES}")
-            total = cursor.fetchone()[0]
-
-            offset = (page - 1) * page_size
-
-            cursor.execute(
-                f"""
-                    SELECT
-                        c.{ChangeField.ID_OLD},
-                        c.{ChangeField.IP_OLD},
-                        c.{ChangeField.COMMUNITY_OLD},
-                        c.{ChangeField.SYSNAME_OLD},
-                        c.{ChangeField.IFINDEX_OLD},
-                        c.{ChangeField.IFNAME_OLD},
-                        c.{ChangeField.IFDESCR_OLD},
-                        c.{ChangeField.IFALIAS_OLD},
-                        c.{ChangeField.IFHIGHSPEED_OLD},
-                        c.{ChangeField.IFOPERSTATUS_OLD},
-                        c.{ChangeField.IFADMINSTATUS_OLD},
-                        c.{ChangeField.ID_NEW},
-                        c.{ChangeField.IP_NEW},
-                        c.{ChangeField.COMMUNITY_NEW},
-                        c.{ChangeField.SYSNAME_NEW},
-                        c.{ChangeField.IFINDEX_NEW},
-                        c.{ChangeField.IFNAME_NEW},
-                        c.{ChangeField.IFDESCR_NEW},
-                        c.{ChangeField.IFALIAS_NEW},
-                        c.{ChangeField.IFHIGHSPEED_NEW},
-                        c.{ChangeField.IFOPERSTATUS_NEW},
-                        c.{ChangeField.IFADMINSTATUS_NEW},
-                        u.{UserField.USERNAME} as {ChangeAssignField.USERNAME},
-                        u.{UserField.NAME} as {ChangeAssignField.NAME},
-                        u.{UserField.LASTNAME} as {ChangeAssignField.LASTNAME}
-                    FROM 
-                        {TableNames.CHANGES} c
-                    LEFT JOIN {TableNames.USERS} u 
-                        ON u.{UserField.USERNAME} = c.{ChangeField.ASSIGNED}
-                    ORDER BY c.{ChangeField.ID_OLD} DESC
-                    LIMIT %s OFFSET %s
-                """,
-                (page_size, offset),
-            )
-            rows = cursor.fetchall()
-            self.database.close_connection()
-            return AdapterChange.response(rows), total
+            with self.database.session() as session:
+                total = session.query(ChangeSchema).count()
+                offset = (page - 1) * page_size
+                rows = (
+                    session.query(ChangeSchema)
+                    .options(joinedload(ChangeSchema.assigned_user))
+                    .order_by(ChangeSchema.id_old.desc())
+                    .limit(page_size)
+                    .offset(offset)
+                    .all()
+                )
+                return AdapterChange.response(rows), total
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Change query error. Failed to get all changes. {error}")
@@ -135,48 +82,15 @@ class ChangeQuery(Query):
             List of changes without an assigned user.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    SELECT
-                        c.{ChangeField.ID_OLD},
-                        c.{ChangeField.IP_OLD},
-                        c.{ChangeField.COMMUNITY_OLD},
-                        c.{ChangeField.SYSNAME_OLD},
-                        c.{ChangeField.IFINDEX_OLD},
-                        c.{ChangeField.IFNAME_OLD},
-                        c.{ChangeField.IFDESCR_OLD},
-                        c.{ChangeField.IFALIAS_OLD},
-                        c.{ChangeField.IFHIGHSPEED_OLD},
-                        c.{ChangeField.IFOPERSTATUS_OLD},
-                        c.{ChangeField.IFADMINSTATUS_OLD},
-                        c.{ChangeField.ID_NEW},
-                        c.{ChangeField.IP_NEW},
-                        c.{ChangeField.COMMUNITY_NEW},
-                        c.{ChangeField.SYSNAME_NEW},
-                        c.{ChangeField.IFINDEX_NEW},
-                        c.{ChangeField.IFNAME_NEW},
-                        c.{ChangeField.IFDESCR_NEW},
-                        c.{ChangeField.IFALIAS_NEW},
-                        c.{ChangeField.IFHIGHSPEED_NEW},
-                        c.{ChangeField.IFOPERSTATUS_NEW},
-                        c.{ChangeField.IFADMINSTATUS_NEW},
-                        u.{UserField.USERNAME} as {ChangeAssignField.USERNAME},
-                        u.{UserField.NAME} as {ChangeAssignField.NAME},
-                        u.{UserField.LASTNAME} as {ChangeAssignField.LASTNAME}
-                    FROM 
-                        {TableNames.CHANGES} c
-                    LEFT JOIN {TableNames.USERS} u 
-                        ON u.{UserField.USERNAME} = c.{ChangeField.ASSIGNED}
-                    WHERE c.{ChangeField.ASSIGNED} IS NULL
-                    ORDER BY c.{ChangeField.ID_OLD} ASC
-                """
-            )
-            rows = cursor.fetchall()
-            self.database.close_connection()
-            return AdapterChange.response(rows)
+            with self.database.session() as session:
+                rows = (
+                    session.query(ChangeSchema)
+                    .options(joinedload(ChangeSchema.assigned_user))
+                    .filter(ChangeSchema.assigned.is_(None))
+                    .order_by(ChangeSchema.id_old.asc())
+                    .all()
+                )
+                return AdapterChange.response(rows)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Change query error. Failed to get unassigned changes. {error}")
@@ -196,24 +110,16 @@ class ChangeQuery(Query):
             True if the data was updated successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            for change in data:
-                cursor.execute(
-                    f"""
-                        UPDATE 
-                            {TableNames.CHANGES}
-                        SET 
-                            {ChangeField.ASSIGNED} = %s
-                        WHERE 
-                            {ChangeField.ID_OLD} = %s AND
-                            {ChangeField.ID_NEW} = %s
-                    """,
-                    (change.username, change.id_old, change.id_new),
-                )
-                self.database.get_connection().commit()
-            self.database.close_connection()
+            with self.database.session() as session:
+                for change in data:
+                    session.execute(
+                        update(ChangeSchema)
+                        .where(
+                            ChangeSchema.id_old == change.id_old,
+                            ChangeSchema.id_new == change.id_new,
+                        )
+                        .values(assigned=change.username)
+                    )
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Change query error. Failed to update changes. {error}")
@@ -230,17 +136,8 @@ class ChangeQuery(Query):
             True if the data was deleted successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    DELETE FROM 
-                        {TableNames.CHANGES}
-                """
-            )
-            self.database.get_connection().commit()
-            self.database.close_connection()
+            with self.database.session() as session:
+                session.query(ChangeSchema).delete()
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Change query error. Failed to delete changes. {error}")

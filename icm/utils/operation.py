@@ -1,6 +1,5 @@
 import json
 import pandas as pd
-from io import StringIO
 from typing import List
 from pydantic import BaseModel
 from icm.constants import InterfaceField
@@ -165,40 +164,6 @@ class OperationData:
             error = str(error).strip().capitalize()
             log.error(f"Operation data error. Failed to compare data frames. {error}")
             return pd.DataFrame(columns=HEADER_RESPONSE_INTERFACES_CHANGES)
-        
-    @staticmethod
-    def transform_to_buffer(data: pd.DataFrame | List[BaseModel]) -> StringIO:
-        """Transform data frame to buffer.
-        
-        Parameters
-        ----------
-        data : pd.DataFrame | List[BaseModel]
-            Data to transform.
-
-        Returns
-        -------
-        StringIO
-            Buffer with data values.
-        """
-        try:
-            buffer = StringIO()
-            if isinstance(data, pd.DataFrame):
-                df = data.copy()
-                df.to_csv(buffer, sep=";", index=False, header=False, na_rep="\\N")
-                buffer.seek(0)
-            elif isinstance(data, list):
-                for value in data:
-                    line = ';'.join(
-                        'null' if value is None else str(value)
-                        for value in value.model_dump().values()
-                    ) + '\n'
-                    buffer.write(line)
-                buffer.seek(0)
-            return buffer
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Operation data error. Failed to transform data frame to buffer. {error}")
-            return StringIO()
         
     @staticmethod
     def transform_to_json(data: pd.DataFrame | List[BaseModel]) -> List[dict]:

@@ -29,12 +29,6 @@ class ChangeModel(BaseModel):
     lastname: str | None
 
 
-class UpdateChangeModel(BaseModel):
-    id_old: int
-    id_new: int
-    username: str
-
-
 class PaginatedChanges(BaseModel):
     items: list[ChangeModel]
     total: int

@@ -1,27 +1,30 @@
 import pandas as pd
 from typing import List
+from sqlalchemy import RowMapping
 from icm.constants import (
     InterfaceField,
     ChangeField,
     ChangeAssignField,
     AssignmentCompleteField,
+    StatisticsField,
 )
 from icm.utils import log
 from icm.access.models.assignment import StatisticsModel
 from icm.access.models.user import UserModel
+from icm.data import AssignmentSchema, ChangeSchema, InterfaceSchema, UserSchema
 
 
 class AdapterInterface:
     """Class to manage interface adapter."""
 
     @staticmethod
-    def response(response_db: List[tuple]) -> pd.DataFrame:
-        """Adapt response from database to model.
+    def response(response_db: List[InterfaceSchema]) -> pd.DataFrame:
+        """Adapt ORM rows to a DataFrame.
 
         Parameters
         ----------
-        response_db : List[tuple]
-            Response from database.
+        response_db : List[InterfaceSchema]
+            Rows returned by the ORM.
 
         Returns
         -------
@@ -44,22 +47,24 @@ class AdapterInterface:
         try:
             if not response_db:
                 return pd.DataFrame(columns=header)
-            columns = list(zip(*response_db))
             response = pd.DataFrame(
-                {
-                    InterfaceField.ID: columns[0],
-                    InterfaceField.IP: columns[1],
-                    InterfaceField.COMMUNITY: columns[2],
-                    InterfaceField.SYSNAME: columns[3],
-                    InterfaceField.IFINDEX: columns[4],
-                    InterfaceField.IFNAME: columns[5],
-                    InterfaceField.IFDESCR: columns[6],
-                    InterfaceField.IFALIAS: columns[7],
-                    InterfaceField.IFHIGHSPEED: columns[8],
-                    InterfaceField.IFOPERSTATUS: columns[9],
-                    InterfaceField.IFADMINSTATUS: columns[10],
-                    InterfaceField.CONSULTED_AT: columns[11],
-                }
+                [
+                    {
+                        InterfaceField.ID: row.id,
+                        InterfaceField.IP: row.ip,
+                        InterfaceField.COMMUNITY: row.community,
+                        InterfaceField.SYSNAME: row.sysname,
+                        InterfaceField.IFINDEX: row.ifIndex,
+                        InterfaceField.IFNAME: row.ifName,
+                        InterfaceField.IFDESCR: row.ifDescr,
+                        InterfaceField.IFALIAS: row.ifAlias,
+                        InterfaceField.IFHIGHSPEED: row.ifHighSpeed,
+                        InterfaceField.IFOPERSTATUS: row.ifOperStatus,
+                        InterfaceField.IFADMINSTATUS: row.ifAdminStatus,
+                        InterfaceField.CONSULTED_AT: row.consulted_at,
+                    }
+                    for row in response_db
+                ]
             )
             response[InterfaceField.ID] = response[InterfaceField.ID].astype(str)
             response[InterfaceField.IP] = response[InterfaceField.IP].astype(str)
@@ -77,17 +82,17 @@ class AdapterUser:
     """Class to manage user adapter."""
 
     @staticmethod
-    def response(response_db: List[tuple]) -> List[UserModel]:
-        """Adapt response from database to model.
+    def response(response_db: List[UserSchema]) -> List[UserModel]:
+        """Adapt ORM rows to a model.
 
         Parameters
         ----------
-        response_db : List[tuple]
-            Response from database.
+        response_db : List[UserSchema]
+            Rows returned by the ORM.
 
         Returns
         -------
-        UserModel
+        List[UserModel]
             Response adapted.
         """
         try:
@@ -96,14 +101,18 @@ class AdapterUser:
                 if row:
                     response.append(
                         UserModel(
-                            username=row[0],
-                            password=row[1],
-                            name=row[2],
-                            lastname=row[3],
-                            status=row[4],
-                            role=row[5],
-                            created_at=row[6].strftime("%Y-%m-%d") if row[6] else None,
-                            updated_at=row[7].strftime("%Y-%m-%d") if row[7] else None,
+                            username=row.username,
+                            password=row.password,
+                            name=row.name,
+                            lastname=row.lastname,
+                            status=row.status,
+                            role=row.role,
+                            created_at=row.created_at.strftime("%Y-%m-%d")
+                            if row.created_at
+                            else None,
+                            updated_at=row.updated_at.strftime("%Y-%m-%d")
+                            if row.updated_at
+                            else None,
                         )
                     )
             return response
@@ -117,13 +126,13 @@ class AdapterChange:
     """Class to manage change adapter."""
 
     @staticmethod
-    def response(response_db: List[tuple]) -> List[dict]:
-        """Adapt response from database to model.
+    def response(response_db: List[ChangeSchema]) -> List[dict]:
+        """Adapt ORM rows to a model.
 
         Parameters
         ----------
-        response_db : List[tuple]
-            Response from database.
+        response_db : List[ChangeSchema]
+            Rows returned by the ORM.
 
         Returns
         -------
@@ -133,31 +142,37 @@ class AdapterChange:
         try:
             return [
                 {
-                    ChangeField.ID_OLD: row[0],
-                    ChangeField.IP_OLD: row[1],
-                    ChangeField.COMMUNITY_OLD: row[2],
-                    ChangeField.SYSNAME_OLD: row[3],
-                    ChangeField.IFINDEX_OLD: row[4],
-                    ChangeField.IFNAME_OLD: row[5],
-                    ChangeField.IFDESCR_OLD: row[6],
-                    ChangeField.IFALIAS_OLD: row[7],
-                    ChangeField.IFHIGHSPEED_OLD: row[8],
-                    ChangeField.IFOPERSTATUS_OLD: row[9],
-                    ChangeField.IFADMINSTATUS_OLD: row[10],
-                    ChangeField.ID_NEW: row[11],
-                    ChangeField.IP_NEW: row[12],
-                    ChangeField.COMMUNITY_NEW: row[13],
-                    ChangeField.SYSNAME_NEW: row[14],
-                    ChangeField.IFINDEX_NEW: row[15],
-                    ChangeField.IFNAME_NEW: row[16],
-                    ChangeField.IFDESCR_NEW: row[17],
-                    ChangeField.IFALIAS_NEW: row[18],
-                    ChangeField.IFHIGHSPEED_NEW: row[19],
-                    ChangeField.IFOPERSTATUS_NEW: row[20],
-                    ChangeField.IFADMINSTATUS_NEW: row[21],
-                    ChangeAssignField.USERNAME: row[22] if row[22] else None,
-                    ChangeAssignField.NAME: row[23] if row[23] else None,
-                    ChangeAssignField.LASTNAME: row[24] if row[24] else None,
+                    ChangeField.ID_OLD: row.id_old,
+                    ChangeField.IP_OLD: row.ip_old,
+                    ChangeField.COMMUNITY_OLD: row.community_old,
+                    ChangeField.SYSNAME_OLD: row.sysname_old,
+                    ChangeField.IFINDEX_OLD: row.ifIndex_old,
+                    ChangeField.IFNAME_OLD: row.ifName_old,
+                    ChangeField.IFDESCR_OLD: row.ifDescr_old,
+                    ChangeField.IFALIAS_OLD: row.ifAlias_old,
+                    ChangeField.IFHIGHSPEED_OLD: row.ifHighSpeed_old,
+                    ChangeField.IFOPERSTATUS_OLD: row.ifOperStatus_old,
+                    ChangeField.IFADMINSTATUS_OLD: row.ifAdminStatus_old,
+                    ChangeField.ID_NEW: row.id_new,
+                    ChangeField.IP_NEW: row.ip_new,
+                    ChangeField.COMMUNITY_NEW: row.community_new,
+                    ChangeField.SYSNAME_NEW: row.sysname_new,
+                    ChangeField.IFINDEX_NEW: row.ifIndex_new,
+                    ChangeField.IFNAME_NEW: row.ifName_new,
+                    ChangeField.IFDESCR_NEW: row.ifDescr_new,
+                    ChangeField.IFALIAS_NEW: row.ifAlias_new,
+                    ChangeField.IFHIGHSPEED_NEW: row.ifHighSpeed_new,
+                    ChangeField.IFOPERSTATUS_NEW: row.ifOperStatus_new,
+                    ChangeField.IFADMINSTATUS_NEW: row.ifAdminStatus_new,
+                    ChangeAssignField.USERNAME: row.assigned_user.username
+                    if row.assigned_user
+                    else None,
+                    ChangeAssignField.NAME: row.assigned_user.name
+                    if row.assigned_user
+                    else None,
+                    ChangeAssignField.LASTNAME: row.assigned_user.lastname
+                    if row.assigned_user
+                    else None,
                 }
                 for row in response_db
             ]
@@ -171,13 +186,14 @@ class AdapterAssignment:
     """Class to manage assignment adapter."""
 
     @staticmethod
-    def response(response_db: List[tuple]) -> pd.DataFrame:
-        """Adapt response from database to model.
+    def response(response_db: List[AssignmentSchema]) -> pd.DataFrame:
+        """Adapt ORM rows to a DataFrame.
 
         Parameters
         ----------
-        response_db : List[tuple]
-            Response from database.
+        response_db : List[AssignmentSchema]
+            Rows returned by the ORM, with `old_interface`, `current_interface`
+            and `user` eagerly loaded.
 
         Returns
         -------
@@ -218,39 +234,41 @@ class AdapterAssignment:
         try:
             if not response_db:
                 return pd.DataFrame(columns=header)
-            columns = list(zip(*response_db))
             response = pd.DataFrame(
-                {
-                    AssignmentCompleteField.ID_OLD: columns[0],
-                    AssignmentCompleteField.IP_OLD: columns[1],
-                    AssignmentCompleteField.COMMUNITY_OLD: columns[2],
-                    AssignmentCompleteField.SYSNAME_OLD: columns[3],
-                    AssignmentCompleteField.IFINDEX_OLD: columns[4],
-                    AssignmentCompleteField.IFNAME_OLD: columns[5],
-                    AssignmentCompleteField.IFDESCR_OLD: columns[6],
-                    AssignmentCompleteField.IFALIAS_OLD: columns[7],
-                    AssignmentCompleteField.IFHIGHSPEED_OLD: columns[8],
-                    AssignmentCompleteField.IFOPERSTATUS_OLD: columns[9],
-                    AssignmentCompleteField.IFADMINSTATUS_OLD: columns[10],
-                    AssignmentCompleteField.ID_NEW: columns[11],
-                    AssignmentCompleteField.IP_NEW: columns[12],
-                    AssignmentCompleteField.COMMUNITY_NEW: columns[13],
-                    AssignmentCompleteField.SYSNAME_NEW: columns[14],
-                    AssignmentCompleteField.IFINDEX_NEW: columns[15],
-                    AssignmentCompleteField.IFNAME_NEW: columns[16],
-                    AssignmentCompleteField.IFDESCR_NEW: columns[17],
-                    AssignmentCompleteField.IFALIAS_NEW: columns[18],
-                    AssignmentCompleteField.IFHIGHSPEED_NEW: columns[19],
-                    AssignmentCompleteField.IFOPERSTATUS_NEW: columns[20],
-                    AssignmentCompleteField.IFADMINSTATUS_NEW: columns[21],
-                    AssignmentCompleteField.USERNAME: columns[22],
-                    AssignmentCompleteField.NAME: columns[23],
-                    AssignmentCompleteField.LASTNAME: columns[24],
-                    AssignmentCompleteField.ASSIGN_BY: columns[25],
-                    AssignmentCompleteField.TYPE_STATUS: columns[26],
-                    AssignmentCompleteField.CREATED_AT: columns[27],
-                    AssignmentCompleteField.UPDATED_AT: columns[28],
-                }
+                [
+                    {
+                        AssignmentCompleteField.ID_OLD: row.old_interface.id,
+                        AssignmentCompleteField.IP_OLD: row.old_interface.ip,
+                        AssignmentCompleteField.COMMUNITY_OLD: row.old_interface.community,
+                        AssignmentCompleteField.SYSNAME_OLD: row.old_interface.sysname,
+                        AssignmentCompleteField.IFINDEX_OLD: row.old_interface.ifIndex,
+                        AssignmentCompleteField.IFNAME_OLD: row.old_interface.ifName,
+                        AssignmentCompleteField.IFDESCR_OLD: row.old_interface.ifDescr,
+                        AssignmentCompleteField.IFALIAS_OLD: row.old_interface.ifAlias,
+                        AssignmentCompleteField.IFHIGHSPEED_OLD: row.old_interface.ifHighSpeed,
+                        AssignmentCompleteField.IFOPERSTATUS_OLD: row.old_interface.ifOperStatus,
+                        AssignmentCompleteField.IFADMINSTATUS_OLD: row.old_interface.ifAdminStatus,
+                        AssignmentCompleteField.ID_NEW: row.current_interface.id,
+                        AssignmentCompleteField.IP_NEW: row.current_interface.ip,
+                        AssignmentCompleteField.COMMUNITY_NEW: row.current_interface.community,
+                        AssignmentCompleteField.SYSNAME_NEW: row.current_interface.sysname,
+                        AssignmentCompleteField.IFINDEX_NEW: row.current_interface.ifIndex,
+                        AssignmentCompleteField.IFNAME_NEW: row.current_interface.ifName,
+                        AssignmentCompleteField.IFDESCR_NEW: row.current_interface.ifDescr,
+                        AssignmentCompleteField.IFALIAS_NEW: row.current_interface.ifAlias,
+                        AssignmentCompleteField.IFHIGHSPEED_NEW: row.current_interface.ifHighSpeed,
+                        AssignmentCompleteField.IFOPERSTATUS_NEW: row.current_interface.ifOperStatus,
+                        AssignmentCompleteField.IFADMINSTATUS_NEW: row.current_interface.ifAdminStatus,
+                        AssignmentCompleteField.USERNAME: row.user.username,
+                        AssignmentCompleteField.NAME: row.user.name,
+                        AssignmentCompleteField.LASTNAME: row.user.lastname,
+                        AssignmentCompleteField.ASSIGN_BY: row.assign_by,
+                        AssignmentCompleteField.TYPE_STATUS: row.type_status,
+                        AssignmentCompleteField.CREATED_AT: row.created_at,
+                        AssignmentCompleteField.UPDATED_AT: row.updated_at,
+                    }
+                    for row in response_db
+                ]
             )
             response[AssignmentCompleteField.ID_OLD] = response[
                 AssignmentCompleteField.ID_OLD
@@ -276,13 +294,14 @@ class AdapterAssignment:
             log.error(f"Assignment adapter error. Failed to adapt response. {error}")
             return pd.DataFrame(columns=header)
 
-    def response_statistics(response_db: List[tuple]) -> List[StatisticsModel]:
-        """Adapt response from database to model.
+    @staticmethod
+    def response_statistics(response_db: List[RowMapping]) -> List[StatisticsModel]:
+        """Adapt aggregated query rows to a model.
 
         Parameters
         ----------
-        response_db : List[tuple]
-            Response from database.
+        response_db : List[RowMapping]
+            Rows returned by the statistics aggregate query, one per username.
 
         Returns
         -------
@@ -295,15 +314,15 @@ class AdapterAssignment:
                 if row:
                     response.append(
                         StatisticsModel(
-                            total_pending_today=row[0],
-                            total_inspected_today=row[1],
-                            total_rediscovered_today=row[2],
-                            total_pending_month=row[3],
-                            total_inspected_month=row[4],
-                            total_rediscovered_month=row[5],
-                            username=row[6],
-                            name=row[7],
-                            lastname=row[8],
+                            total_pending_today=row[StatisticsField.TOTAL_PENDING_TODAY],
+                            total_inspected_today=row[StatisticsField.TOTAL_INSPECTED_TODAY],
+                            total_rediscovered_today=row[StatisticsField.TOTAL_REDISCOVERED_TODAY],
+                            total_pending_month=row[StatisticsField.TOTAL_PENDING_MONTH],
+                            total_inspected_month=row[StatisticsField.TOTAL_INSPECTED_MONTH],
+                            total_rediscovered_month=row[StatisticsField.TOTAL_REDISCOVERED_MONTH],
+                            username=row[StatisticsField.USERNAME],
+                            name=row[StatisticsField.NAME],
+                            lastname=row[StatisticsField.LASTNAME],
                         )
                     )
             return response

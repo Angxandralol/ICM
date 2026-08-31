@@ -1,25 +1,27 @@
-from io import StringIO
+import pandas as pd
 from pandas import DataFrame
-from icm.data import TableNames
+from sqlalchemy import insert
+from icm.data import InterfaceSchema
 from icm.utils import log
 from icm.access.querys.query import Query
 from icm.access.utils.adapter import AdapterInterface
-from icm.constants.fields import InterfaceField
+from icm.access.utils.frame import dataframe_to_rows
 
 
 class InterfaceQuery(Query):
     """Class to manage interface query."""
 
-    def __init__(self, uri: str | None = None):
-        super().__init__(uri=uri)
+    def __init__(self):
+        super().__init__()
 
-    def insert(self, data: StringIO) -> bool:
+    def insert(self, data: pd.DataFrame) -> bool:
         """Insert interfaces in database.
 
         Parameters
         ----------
-        data : StringIO
-            Data to insert.
+        data : pd.DataFrame
+            Interfaces to insert. Columns must match `InterfaceSchema`'s
+            attribute names.
 
         Returns
         -------
@@ -27,30 +29,9 @@ class InterfaceQuery(Query):
             True if the data was inserted successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.copy_from(
-                file=data,
-                table=TableNames.INTERFACES,
-                sep=";",
-                null="\\N",
-                columns=(
-                    InterfaceField.IP.lower(),
-                    InterfaceField.COMMUNITY.lower(),
-                    InterfaceField.SYSNAME.lower(),
-                    InterfaceField.IFINDEX.lower(),
-                    InterfaceField.IFNAME.lower(),
-                    InterfaceField.IFDESCR.lower(),
-                    InterfaceField.IFALIAS.lower(),
-                    InterfaceField.IFHIGHSPEED.lower(),
-                    InterfaceField.IFOPERSTATUS.lower(),
-                    InterfaceField.IFADMINSTATUS.lower(),
-                    InterfaceField.CONSULTED_AT.lower(),
-                ),
-            )
-            self.database.get_connection().commit()
-            self.database.close_connection()
+            rows = dataframe_to_rows(data)
+            with self.database.session() as session:
+                session.execute(insert(InterfaceSchema), rows)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Interface query error. Failed to insert interfaces. {error}")
@@ -65,20 +46,15 @@ class InterfaceQuery(Query):
         ----------
         date : str
             Date to delete interfaces.
+
+        Returns
+        -------
+        bool
+            True if the data was deleted successfully, False otherwise.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    DELETE FROM {TableNames.INTERFACES}
-                    WHERE {InterfaceField.CONSULTED_AT} = %s
-                """,
-                (date,),
-            )
-            self.database.get_connection().commit()
-            self.database.close_connection()
+            with self.database.session() as session:
+                session.query(InterfaceSchema).filter_by(consulted_at=date).delete()
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
@@ -95,29 +71,23 @@ class InterfaceQuery(Query):
         ----------
         date : str
             Date to get interfaces.
+
+        Returns
+        -------
+        DataFrame
+            Interfaces consulted on that date.
         """
         try:
-            if not self.database.connected:
-                self.database.open_connection()
-            cursor = self.database.get_cursor()
-            cursor.execute(
-                f"""
-                    SELECT
-                        *
-                    FROM
-                        {TableNames.INTERFACES}
-                    WHERE
-                        {InterfaceField.CONSULTED_AT} = %s
-                """,
-                (date,),
-            )
-            response = cursor.fetchall()
-            self.database.close_connection()
-            return AdapterInterface.response(response)
+            with self.database.session() as session:
+                rows = (
+                    session.query(InterfaceSchema)
+                    .filter_by(consulted_at=date)
+                    .all()
+                )
+                return AdapterInterface.response(rows)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Interface query error. Failed to get interfaces by date. {error}"
             )
-            return []
-
+            return pd.DataFrame()

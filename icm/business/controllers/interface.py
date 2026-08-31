@@ -25,8 +25,7 @@ class InterfaceController:
             header_data = interfaces.columns.tolist()
             if not header_data == HEADER_CONSULT_SNMP:
                 return ResponseCode(status=400, message="Invalid header of data interfaces to insert")
-            buffer = OperationData.transform_to_buffer(interfaces)
-            status_operation = query.insert(data=buffer)
+            status_operation = query.insert(data=interfaces)
             if not status_operation: raise Exception()
             return ResponseCode(status=201)
         except Exception as error:
@@ -60,8 +59,7 @@ class InterfaceController:
             status_operation = query.delete_by_date_consult(date=date)
             if not status_operation:
                 return ResponseCode(status=500, message=f"Failed to delete interfaces to reload {date}")
-            buffer = OperationData.transform_to_buffer(interfaces)
-            status_operation = query.insert(data=buffer)
+            status_operation = query.insert(data=interfaces)
             if not status_operation:
                 return ResponseCode(status=500, message=f"Failed to reload interfaces of {date}")
             return ResponseCode(status=200)
