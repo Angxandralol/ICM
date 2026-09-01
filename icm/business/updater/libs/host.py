@@ -1,5 +1,5 @@
 import pandas as pd
-from icm.constants import InterfaceField
+from icm.constants import InterfaceField, EMPTY_FIELD_PLACEHOLDER
 from icm.utils import log
 from icm.business.updater.libs.ping import Ping
 from icm.business.updater.libs.snmp import SnmpHandler
@@ -132,8 +132,8 @@ class HostHandler:
                     InterfaceField.IFINDEX
                 ]
             )
-            data_ifIndex = data_ifIndex.fillna('CAMPO VACIO')  # Reemplaza NaN y None
-            data_ifIndex = data_ifIndex.replace('', 'CAMPO VACIO')
+            data_ifIndex = data_ifIndex.fillna(EMPTY_FIELD_PLACEHOLDER)
+            data_ifIndex = data_ifIndex.replace('', EMPTY_FIELD_PLACEHOLDER)
             data_ifIndex = data_ifIndex.reset_index(drop=True)
             return data_ifIndex
         except Exception as error:

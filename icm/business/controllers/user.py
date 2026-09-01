@@ -1,8 +1,9 @@
-from typing import Tuple, List
+from typing import List
+from fastapi import status as http_status
 from icm.access import UserQuery
-from icm.constants import RoleTypes, UserStatusTypes
+from icm.constants import UserStatusTypes
 from icm.utils import Validate, log
-from icm.business.libs.code import ResponseCode
+from icm.business.exceptions import BusinessError
 from icm.business.controllers.config import ConfigController
 from icm.business.controllers.security import SecurityController
 from icm.business.models.user import UserModel, UserLoggedModel, UpdateUserModel
@@ -12,9 +13,9 @@ class UserController:
     """Class to manage user controller."""
 
     @staticmethod
-    def new_user(new_user: UserModel) -> ResponseCode:
+    def new_user(new_user: UserModel) -> None:
         """Insert a new user.
-        
+
         Parameters
         ----------
         new_user : UserModel
@@ -23,27 +24,28 @@ class UserController:
         try:
             query = UserQuery()
             if query.get(username=new_user.username):
-                return ResponseCode(status=400, message="Invalid username")
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid username")
             if not Validate.role(role=new_user.role):
-                return ResponseCode(status=400, message="Invalid role")
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid role")
             if not Validate.status(status=new_user.status):
-                return ResponseCode(status=400, message="Invalid status")
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid status")
             security = SecurityController()
             hashed_password = security.create_password_hash(password=new_user.password)
             new_user.password = hashed_password
             status_operation = query.insert(new_user=new_user)
             if not status_operation:
-                return ResponseCode(status=400, message="Failed to insert user")
-            return ResponseCode(status=201)
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Failed to insert user")
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to insert a new user. {error}")
-            return ResponseCode(status=500)
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to insert a new user")
+
     @staticmethod
-    def update_user(update_user: UpdateUserModel) -> ResponseCode:
+    def update_user(update_user: UpdateUserModel) -> None:
         """Update a user.
-        
+
         Parameters
         ----------
         user : UserModel
@@ -52,11 +54,11 @@ class UserController:
         try:
             query = UserQuery()
             if not query.get(username=update_user.username):
-                return ResponseCode(status=404, message="User not found to update")
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "User not found to update")
             if not Validate.role(role=update_user.role):
-                return ResponseCode(status=400, message="Invalid role")
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid role")
             if not Validate.status(status=update_user.status):
-                return ResponseCode(status=400, message="Invalid status")
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid status")
             user = UserModel(
                 username=update_user.username,
                 password="",
@@ -69,17 +71,18 @@ class UserController:
             )
             status_operation = query.update(user=user)
             if not status_operation:
-                return ResponseCode(status=500, message="Failed to update user")
-            return ResponseCode(status=200)
+                raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to update user")
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to update a user. {error}")
-            return ResponseCode(status=500)
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to update a user")
+
     @staticmethod
-    def update_password(username: str, password: str) -> ResponseCode:
+    def update_password(username: str, password: str) -> None:
         """Update password of a user.
-        
+
         Parameters
         ----------
         username : str
@@ -90,22 +93,23 @@ class UserController:
         try:
             query = UserQuery()
             if not query.get(username=username):
-                return ResponseCode(status=404, message="User not found to update")
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "User not found to update")
             security = SecurityController()
             hashed_password = security.create_password_hash(password=password)
             status_operation = query.update_password(username=username, password=hashed_password)
             if not status_operation:
-                return ResponseCode(status=500, message="Failed to update password")
-            return ResponseCode(status=200)
+                raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to update password")
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to update password. {error}")
-            return ResponseCode(status=500)
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to update password")
+
     @staticmethod
-    def get_user(username: str) -> Tuple[ResponseCode, UserModel | None]:
+    def get_user(username: str) -> UserModel:
         """Get a user.
-        
+
         Parameters
         ----------
         username : str
@@ -113,24 +117,26 @@ class UserController:
 
         Returns
         -------
-        Tuple[ResponseCode, UserModel | None]
-            Response code and user.
+        UserModel
+            User found.
         """
         try:
             query = UserQuery()
             user = query.get(username=username)
             if not user:
-                return ResponseCode(status=404, message="User not found"), None
-            return ResponseCode(status=200), user
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "User not found")
+            return user
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to get a user. {error}")
-            return ResponseCode(status=500), None
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get a user")
+
     @staticmethod
-    def get_user_logged(username: str) -> Tuple[ResponseCode, UserLoggedModel | None]:
+    def get_user_logged(username: str) -> UserLoggedModel:
         """Get user logged.
-        
+
         Parameters
         ----------
         username : str
@@ -138,36 +144,25 @@ class UserController:
 
         Returns
         -------
-        Tuple[ResponseCode, UserLoggedModel | None]
-            Response code and user logged.
+        UserLoggedModel
+            User logged, with its permissions resolved.
         """
         try:
             query = UserQuery()
             user = query.get(username=username)
             if not user:
-                return ResponseCode(status=404, message="User not found"), None
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "User not found")
             config = ConfigController.get_config()
-            if user.status == UserStatusTypes.ACTIVE and user.role == RoleTypes.ROOT:
-                can_assign = config.can_assign.root
-                can_receive_assignment = config.can_receive_assignment.root
-                view_information_global = config.view_information_global.root
-            elif user.status == UserStatusTypes.ACTIVE and user.role == RoleTypes.ADMIN:
-                can_assign = config.can_assign.admin
-                can_receive_assignment = config.can_receive_assignment.admin
-                view_information_global = config.view_information_global.admin
-            elif user.status == UserStatusTypes.ACTIVE and user.role == RoleTypes.USER:
-                can_assign = config.can_assign.user
-                can_receive_assignment = config.can_receive_assignment.user
-                view_information_global = config.view_information_global.user
-            elif user.status == UserStatusTypes.ACTIVE and user.role == RoleTypes.SOPORT:
-                can_assign = config.can_assign.soport
-                can_receive_assignment = config.can_receive_assignment.soport
-                view_information_global = config.view_information_global.soport
+            if user.status == UserStatusTypes.ACTIVE:
+                role_key = user.role.lower()
+                can_assign = getattr(config.can_assign, role_key, False)
+                can_receive_assignment = getattr(config.can_receive_assignment, role_key, False)
+                view_information_global = getattr(config.view_information_global, role_key, False)
             else:
                 can_assign = False
                 can_receive_assignment = False
                 view_information_global = False
-            user_logged = UserLoggedModel(
+            return UserLoggedModel(
                 username=user.username,
                 name=user.name,
                 lastname=user.lastname,
@@ -177,61 +172,56 @@ class UserController:
                 can_receive_assignment=can_receive_assignment,
                 view_information_global=view_information_global
             )
-            return ResponseCode(status=200), user_logged
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to get a user logged. {error}")
-            return ResponseCode(status=500), None
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get a user logged")
+
     @staticmethod
-    def get_all_users() -> Tuple[ResponseCode, List[UserModel]]:
+    def get_all_users() -> List[UserModel]:
         """Get all users.
-        
+
         Returns
         -------
-        Tuple[ResponseCode, List[UserModel]]
-            Response code and list of users.
+        List[UserModel]
+            All users, including deleted ones.
         """
         try:
             query = UserQuery()
-            users = query.get_all()
-            if not users: return ResponseCode(status=200), []
-            return ResponseCode(status=200), users
+            return query.get_all() or []
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to get all users. {error}")
-            return ResponseCode(status=500), []
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get all users")
+
     @staticmethod
-    def get_users() -> Tuple[ResponseCode, List[UserModel]]:
+    def get_users() -> List[UserModel]:
         """Get users without deleted."""
         try:
             query = UserQuery()
-            users = query.get_users()
-            if not users: return ResponseCode(status=200), []
-            return ResponseCode(status=200), users
+            return query.get_users() or []
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to get users. {error}")
-            return ResponseCode(status=500), []
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get users")
+
     @staticmethod
-    def get_deleted_users() -> Tuple[ResponseCode, List[UserModel]]:
+    def get_deleted_users() -> List[UserModel]:
         """Get deleted users."""
         try:
             query = UserQuery()
-            users = query.get_deleted()
-            if not users: return ResponseCode(status=200), []
-            return ResponseCode(status=200), users
+            return query.get_deleted() or []
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to get users. {error}")
-            return ResponseCode(status=500), []
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get deleted users")
+
     @staticmethod
-    def get_users_by_category(status: str, role: str) -> Tuple[ResponseCode, List[UserModel]]:
+    def get_users_by_category(status: str, role: str) -> List[UserModel]:
         """Get users by a category.
-        
+
         Parameters
         ----------
         status : str
@@ -241,20 +231,19 @@ class UserController:
 
         Returns
         -------
-        Tuple[ResponseCode, List[UserModel]]
-            Response code and list of users.
+        List[UserModel]
+            Users matching the given status and role.
         """
         try:
             query = UserQuery()
             if not Validate.status(status=status):
-                return ResponseCode(status=400, message="Invalid status"), []
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid status")
             if not Validate.role(role=role):
-                return ResponseCode(status=400, message="Invalid role"), []
-            users = query.get_users_by_category(status=status, role=role)
-            if not users:
-                return ResponseCode(status=200), []
-            return ResponseCode(status=200), users
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid role")
+            return query.get_users_by_category(status=status, role=role) or []
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"User controller error. Failed to get users by category. {error}")
-            return ResponseCode(status=500), []
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get users by category")

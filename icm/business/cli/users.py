@@ -2,7 +2,6 @@ import rich
 from rich.prompt import Prompt
 from icm.constants import RoleTypes, UserStatusTypes
 from icm.utils import Validate, Configuration, log
-from icm.business.libs.code import ResponseCode
 from icm.business.controllers.user import UserController
 from icm.business.models.user import UserModel
 
@@ -38,19 +37,16 @@ class UserCLI:
                 log.info("Registration canceled")
                 rich.print(f"[gold3]Registration canceled")
                 exit(0)
-            response: ResponseCode = controller.new_user(new_user=new_user)
-            if response.status == 201:
-                log.info("User registered successfully")
-                rich.print(f"[green]User registered successfully[/green]")
-                exit(0)
-            else:
-                raise Exception(response.message)
+            controller.new_user(new_user=new_user)
+            log.info("User registered successfully")
+            rich.print(f"[green]User registered successfully[/green]")
+            exit(0)
         except Exception as error:
             log.error(f"Register error. {error}")
             rich.print(f"[red]Error[/red] {error}")
             exit(1)
 
-    
+    @staticmethod
     def restore_password() -> None:
         """Restart password."""
         log.info("Restarting password...")
@@ -60,13 +56,10 @@ class UserCLI:
             username = Prompt.ask("Username")
             if not username: raise ValueError("Username cannot be empty")
             password = configuration.generate_default_password()
-            response: ResponseCode = controller.update_password(username=username, password=password)
-            if response.status == 200:
-                log.info(f"Password restarted successfully to {username}")
-                rich.print(f"[green]Password restarted successfully. Your new password is[/green] {password}")
-                exit(0)
-            else:
-                raise Exception(response.message)
+            controller.update_password(username=username, password=password)
+            log.info(f"Password restarted successfully to {username}")
+            rich.print(f"[green]Password restarted successfully. Your new password is[/green] {password}")
+            exit(0)
         except Exception as error:
             log.error(f"Restart password error. {error}")
             rich.print(f"[red]Error[/red] {error}")

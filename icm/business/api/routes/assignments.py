@@ -1,69 +1,43 @@
-from typing import Annotated
-from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from icm.business.libs.code import ResponseCode
+from fastapi import APIRouter
+from icm.access import ReassignmentModel
+from icm.business.api.dependencies import AssignPermissionUser, CurrentUser
+from icm.business.constants.tags import ApiTags
 from icm.business.controllers.assignment import AssignmentController
-from icm.business.controllers.config import ConfigController
-from icm.business.controllers.security import SecurityController
-from icm.business.models.user import UserModel
-from icm.business.models.assignment import NewAssignmentModel, ReassignmentModel, UpdateAssignmentModel
+from icm.business.models.response import MessageResponse
+from icm.business.models.assignment import NewAssignmentModel, UpdateAssignmentModel
 
 
-router = APIRouter()
+router = APIRouter(prefix="/assignments", tags=[ApiTags.ASSIGNMENTS])
+
 
 class RequestAutomaticAssignment(BaseModel):
     usernames: list[str]
 
 
-@router.post("/assignments/new", status_code=201)
-def new_assignments(assignments: list[NewAssignmentModel], user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
-    """New assignments."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    permission_request = ConfigController.can_assign_permission(role=user.role)
-    if not permission_request:
-        raise ResponseCode(status=403, message="User not authorized to assign").error
-    controller = AssignmentController()
-    response: ResponseCode = controller.new_assignment(assignments=assignments)
-    if response.status == 201:
-        return {"message": "Assignments created successfully"}
-    raise response.error
+@router.post("/new", status_code=201, response_model=MessageResponse)
+def new_assignments(assignments: list[NewAssignmentModel], user: AssignPermissionUser):
+    """Create new assignments."""
+    AssignmentController.new_assignment(assignments=assignments)
+    return MessageResponse(message="Assignments created successfully")
 
-@router.post("/assignments/reassign")
-def reassign_assignments(assignments: list[ReassignmentModel], user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
+
+@router.post("/reassign", response_model=MessageResponse)
+def reassign_assignments(assignments: list[ReassignmentModel], user: AssignPermissionUser):
     """Reassign assignments."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    permission_request = ConfigController.can_assign_permission(role=user.role)
-    if not permission_request:
-        raise ResponseCode(status=403, message="User not authorized to reassign").error
-    controller = AssignmentController()
-    response: ResponseCode = controller.reassign(assignments=assignments)
-    if response.status == 200:
-        return {"message": "Assignments reassigned successfully"}
-    raise response.error
+    AssignmentController.reassign(assignments=assignments)
+    return MessageResponse(message="Assignments reassigned successfully")
 
-@router.post("/assignments/automatic", status_code=201)
-def automatic_assignment(request: RequestAutomaticAssignment, user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
-    """Automatic assignment."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    permission_request = ConfigController.can_assign_permission(role=user.role)
-    if not permission_request:
-        raise ResponseCode(status=403, message="User not authorized to automatic assignment").error
-    controller = AssignmentController()
-    response: ResponseCode = controller.automatic_assignment(assign_by=user.username, usernames=request.usernames)
-    if response.status == 201:
-        return {"message": "Assignments automatic assigned successfully"}
-    raise response.error
 
-@router.post("/assignments/status")
-def update_assignments_status(assignments: list[UpdateAssignmentModel], user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
+@router.post("/automatic", status_code=201, response_model=MessageResponse)
+def automatic_assignment(request: RequestAutomaticAssignment, user: AssignPermissionUser):
+    """Automatically distribute unassigned changes across the given usernames."""
+    AssignmentController.automatic_assignment(assign_by=user.username, usernames=request.usernames)
+    return MessageResponse(message="Assignments automatic assigned successfully")
+
+
+@router.post("/status", response_model=MessageResponse)
+def update_assignments_status(assignments: list[UpdateAssignmentModel], user: CurrentUser):
     """Update assignments status."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    controller = AssignmentController()
-    response: ResponseCode = controller.update_status_assignment(assignments=assignments, username=user.username)
-    if response.status == 200:
-        return {"message": "Assignments status updated successfully"}
-    raise response.error
+    AssignmentController.update_status_assignment(assignments=assignments, username=user.username)
+    return MessageResponse(message="Assignments status updated successfully")

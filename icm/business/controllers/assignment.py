@@ -1,28 +1,26 @@
 import pandas as pd
-from typing import Tuple, List
+from typing import List
+from fastapi import status as http_status
 from icm.access import (
     AssignmentQuery,
     ChangeQuery,
     UserQuery,
+    ReassignmentModel,
     UpdateChangeModel,
     UpdateAssignmentModel as AccessUpdateAssignmentModel,
 )
 from icm.constants import AssignmentStatusTypes
 from icm.utils import OperationData, Validate, log
 from icm.constants.fields import ChangeField
-from icm.business.libs.code import ResponseCode
-from icm.business.models.assignment import (
-    NewAssignmentModel,
-    ReassignmentModel,
-    UpdateAssignmentModel,
-)
+from icm.business.exceptions import BusinessError
+from icm.business.models.assignment import NewAssignmentModel, UpdateAssignmentModel
 
 
 class AssignmentController:
     """Class to manage assignment controller."""
 
     @staticmethod
-    def new_assignment(assignments: List[NewAssignmentModel]) -> ResponseCode:
+    def new_assignment(assignments: List[NewAssignmentModel]) -> None:
         """Insert a new assignment.
 
         Parameters
@@ -49,16 +47,15 @@ class AssignmentController:
             status_operation = change_query.update_assign(data=changes)
             if not status_operation:
                 raise Exception()
-            return ResponseCode(status=201)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to insert a new assignment. {error}"
             )
-            return ResponseCode(status=500)
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to insert a new assignment")
 
     @staticmethod
-    def reassign(assignments: List[ReassignmentModel]) -> ResponseCode:
+    def reassign(assignments: List[ReassignmentModel]) -> None:
         """Reassign assignments.
 
         Parameters
@@ -84,25 +81,24 @@ class AssignmentController:
             status_operation = change_query.update_assign(data=changes)
             if not status_operation:
                 raise Exception()
-            return ResponseCode(status=200)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to reassign assignments. {error}"
             )
-            return ResponseCode(status=500)
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to reassign assignments")
 
     @staticmethod
-    def automatic_assignment(assign_by: str, usernames: List[str]) -> ResponseCode:
+    def automatic_assignment(assign_by: str, usernames: List[str]) -> None:
         """Automatic assignment."""
         try:
             if not usernames:
-                return ResponseCode(status=404, message="No users found")
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "No users found")
             change_query = ChangeQuery()
             assign_query = AssignmentQuery()
             changes = change_query.get_all_unassigned()
             if not changes:
-                return ResponseCode(status=404, message="No change interfaces found")
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "No change interfaces found")
             total_users = len(usernames)
             total_changes = len(changes)
             base = total_changes // total_users
@@ -137,18 +133,19 @@ class AssignmentController:
             status_operation = change_query.update_assign(data=update_changes)
             if not status_operation:
                 raise Exception()
-            return ResponseCode(status=201)
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to automatic assignment. {error}"
             )
-            return ResponseCode(status=500)
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to automatic assignment")
 
     @staticmethod
     def update_status_assignment(
         assignments: List[UpdateAssignmentModel], username: str
-    ) -> ResponseCode:
+    ) -> None:
         """Update assignments status.
 
         Parameters
@@ -158,7 +155,7 @@ class AssignmentController:
         """
         try:
             query = AssignmentQuery()
-            list_assingments: list[AccessUpdateAssignmentModel] = []
+            list_assingments: List[AccessUpdateAssignmentModel] = []
             for assignment in assignments:
                 list_assingments.append(
                     AccessUpdateAssignmentModel(
@@ -171,18 +168,15 @@ class AssignmentController:
             status_operation = query.update_status(data=list_assingments)
             if not status_operation:
                 raise Exception()
-            return ResponseCode(status=200)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to update assignments status. {error}"
             )
-            return ResponseCode(status=500)
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to update assignments status")
 
     @staticmethod
-    def get_all_assignments_filter_by_status(
-        status: str,
-    ) -> Tuple[ResponseCode, List[dict]]:
+    def get_all_assignments_filter_by_status(status: str) -> List[dict]:
         """Get all assignments filter by a status.
 
         Parameters
@@ -192,29 +186,28 @@ class AssignmentController:
 
         Returns
         -------
-        Tuple[ResponseCode, DataFrame]
-            Response code and a list of assignments.
+        List[dict]
+            Assignments filtered by status.
         """
         try:
             query = AssignmentQuery()
             if not Validate.assignment_status(status=status):
-                return ResponseCode(status=400, message="Invalid status"), []
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid status")
             data = query.get_all_by_status(status=status)
             if data.empty:
-                return ResponseCode(status=200), []
-            data = OperationData.transform_to_json(data=data)
-            return ResponseCode(status=200), data
+                return []
+            return OperationData.transform_to_json(data=data)
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to get assignments by status. {error}"
             )
-            return ResponseCode(status=500), []
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get assignments by status")
 
     @staticmethod
-    def get_user_assignments_filter_by_status(
-        username: str, status: str
-    ) -> Tuple[ResponseCode, List[dict]]:
+    def get_user_assignments_filter_by_status(username: str, status: str) -> List[dict]:
         """Get user assignments filter by a status.
 
         Parameters
@@ -226,69 +219,67 @@ class AssignmentController:
 
         Returns
         -------
-        Tuple[ResponseCode, DataFrame]
-            Response code and a list of assignments.
+        List[dict]
+            Assignments of the user filtered by status.
         """
         try:
             if not Validate.assignment_status(status=status):
-                return ResponseCode(status=400, message="Invalid status"), []
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid status")
             user_query = UserQuery()
             if not user_query.get(username=username):
-                return ResponseCode(status=404, message="User not found"), []
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "User not found")
             query = AssignmentQuery()
             data = query.assigned_by_status(username=username, status=status)
             if data.empty:
-                return ResponseCode(status=200), []
-            data = OperationData.transform_to_json(data=data)
-            return ResponseCode(status=200), data
+                return []
+            return OperationData.transform_to_json(data=data)
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to get assignments by username and status. {error}"
             )
-            return ResponseCode(status=500), []
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get assignments by username and status")
 
     @staticmethod
-    def get_user_assignments_completed_in_month(
-        username: str, date: int
-    ) -> Tuple[ResponseCode, List[dict]]:
+    def get_user_assignments_completed_in_month(username: str, date: str) -> List[dict]:
         """Get user assignments completed in a month.
 
         Parameters
         ----------
         username : str
             Username to get assignments.
-        date : int
+        date : str
             Month to get assignments (YYYY-MM).
 
         Returns
         -------
-        Tuple[ResponseCode, List[dict]]
-            Response code and a list of assignments.
+        List[dict]
+            Assignments of the user completed in the given month.
         """
         try:
             if not Validate.month_date(date):
-                return ResponseCode(status=400, message="Invalid date"), []
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid date")
             user_query = UserQuery()
             if not user_query.get(username=username):
-                return ResponseCode(status=404, message="User not found"), []
+                raise BusinessError(http_status.HTTP_404_NOT_FOUND, "User not found")
             query = AssignmentQuery()
             data = query.completed_by_month(username=username, date=date)
             if data.empty:
-                return ResponseCode(status=200), []
-            data = OperationData.transform_to_json(data=data)
-            return ResponseCode(status=200), data
+                return []
+            return OperationData.transform_to_json(data=data)
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to get assignments completed in month. {error}"
             )
-            return ResponseCode(status=500), []
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get assignments completed in month")
 
     @staticmethod
-    def get_users_assignments_completed_in_month(
-        usernames: List[str], date: str
-    ) -> Tuple[ResponseCode, List[dict]]:
+    def get_users_assignments_completed_in_month(usernames: List[str], date: str) -> List[dict]:
         """Get assignments completed in a month of all users.
 
         Parameters
@@ -300,13 +291,13 @@ class AssignmentController:
 
         Returns
         -------
-        Tuple[ResponseCode, List[dict]]
-            Response code and a list of assignments.
+        List[dict]
+            Assignments of all users completed in the given month.
         """
         try:
             response = []
             if not Validate.month_date(date):
-                return ResponseCode(status=400, message="Invalid date"), []
+                raise BusinessError(http_status.HTTP_400_BAD_REQUEST, "Invalid date")
             for username in usernames:
                 user_query = UserQuery()
                 if not user_query.get(username=username):
@@ -320,30 +311,36 @@ class AssignmentController:
                     response = data
                 else:
                     response = response + data
-            return ResponseCode(status=200), response
+            return response
+        except BusinessError:
+            raise
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(
                 f"Assignment controller error. Failed to get assignments completed in month. {error}"
             )
-            return ResponseCode(status=500), []
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get assignments completed in month")
 
     @staticmethod
-    def get_date_available_to_consult_history() -> Tuple[ResponseCode, List[str]]:
+    def get_date_available_to_consult_history() -> List[str]:
+        """Get every distinct month with at least one assignment.
+
+        Returns
+        -------
+        List[str]
+            Months (YYYY-MM) available to consult, most recent first.
+        """
         try:
             query = AssignmentQuery()
-            response = query.date_available_to_consult_history()
-            return ResponseCode(status=200), response
+            return query.date_available_to_consult_history()
         except Exception as error:
             log.error(
                 f"Assignment controller error. Failed to get date availables to consult history. {error}"
             )
-            return ResponseCode(status=500), []
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get date availables to consult history")
 
     @staticmethod
-    def get_statistics_assignments(
-        usernames: List[str],
-    ) -> Tuple[ResponseCode, List[dict]]:
+    def get_statistics_assignments(usernames: List[str]) -> List[dict]:
         """Get statistics of assignments.
 
         Parameters
@@ -353,18 +350,16 @@ class AssignmentController:
 
         Returns
         -------
-        Tuple[ResponseCode, DataFrame]
-            Response code and a list of statistics.
+        List[dict]
+            Statistics of assignments by username.
         """
         try:
             query = AssignmentQuery()
             data = query.get_statistics(usernames=usernames)
             if not data:
-                return ResponseCode(status=200), []
-            data = OperationData.transform_to_json(data=data)
-            return ResponseCode(status=200), data
+                return []
+            return OperationData.transform_to_json(data=data)
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Assignment controller error. Failed to get statistics. {error}")
-            return ResponseCode(status=500), []
-
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get statistics")

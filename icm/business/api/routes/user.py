@@ -1,59 +1,35 @@
-from typing import Annotated, Tuple
-from fastapi import APIRouter, Depends
-from icm.business.libs.code import ResponseCode
-from icm.business.controllers.config import ConfigController
-from icm.business.controllers.security import SecurityController
+from fastapi import APIRouter
+from icm.business.api.dependencies import AssignPermissionUser, CurrentUser
+from icm.business.constants.tags import ApiTags
 from icm.business.controllers.user import UserController
-from icm.business.models.user import UserModel, UserLoggedModel, UpdateUserModel
+from icm.business.models.response import MessageResponse
+from icm.business.models.user import UserLoggedModel, UserPublicModel, UpdatePasswordModel, UpdateUserModel
 
 
-router = APIRouter()
+router = APIRouter(prefix="/user", tags=[ApiTags.USERS])
 
 
-@router.get("/user/info")
-def get_user(user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
+@router.get("/info", response_model=UserLoggedModel)
+def get_user(user: CurrentUser):
     """Get user logged."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    controller = UserController()
-    response: Tuple[ResponseCode, UserLoggedModel | None] = controller.get_user_logged(username=user.username)
-    if response[0].status == 200:
-        return response[1]
-    raise response[0].error
+    return UserController.get_user_logged(username=user.username)
 
-@router.get("/user/all")
-def get_users(user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
+
+@router.get("/all", response_model=list[UserPublicModel])
+def get_users(user: AssignPermissionUser):
     """Get all users active."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    permission_request = ConfigController.can_assign_permission(role=user.role)
-    if not permission_request:
-        raise ResponseCode(status=403, message="User not authorized to get users").error
-    controller = UserController()
-    response: Tuple[ResponseCode, list[UserModel]] = controller.get_users()
-    if response[0].status == 200:
-        if response[1]: return [user.model_dump(exclude={"password"}) for user in response[1]]
-        return []
-    raise response[0].error
+    return UserController.get_users()
 
-@router.put("/user/info")
-def update_user(new_user: UpdateUserModel, user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
+
+@router.put("/info", response_model=MessageResponse)
+def update_user(new_user: UpdateUserModel, user: AssignPermissionUser):
     """Update user."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    controller = UserController()
-    response: ResponseCode = controller.update_user(update_user=new_user)
-    if response.status == 200:
-        return {"message": "User updated successfully"}
-    raise response.error
+    UserController.update_user(update_user=new_user)
+    return MessageResponse(message="User updated successfully")
 
-@router.patch("/user/info/password")
-def update_password(new_password: str, user: Annotated[UserModel, Depends(SecurityController.get_current_user)]):
-    """Update password of a user."""
-    if not user:
-        raise ResponseCode(status=401, message="User unauthorized").error
-    controller = UserController()
-    response: ResponseCode = controller.update_password(username=user.username, password=new_password)
-    if response.status == 200:
-        return {"message": "Password updated successfully"}
-    raise response.error
+
+@router.patch("/info/password", response_model=MessageResponse)
+def update_password(request: UpdatePasswordModel, user: CurrentUser):
+    """Update password of the logged-in user."""
+    UserController.update_password(username=user.username, password=request.password)
+    return MessageResponse(message="Password updated successfully")

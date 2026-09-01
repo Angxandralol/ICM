@@ -20,7 +20,7 @@ class UpdaterHandler:
     def __init__(self):
         pass
 
-    def _export_consults(self, data: pd.DataFrame) -> None:
+    def _export_consults(self, data: pd.DataFrame) -> bool:
         """Export data of consults temporary."""
         try:
             root_path = path.abspath(
@@ -38,6 +38,7 @@ class UpdaterHandler:
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Updater handler error. Failed to save consults. {error}")
+            return False
 
     def _load_tmp(self) -> pd.DataFrame:
         """Load data of consults temporary if exists."""
@@ -115,7 +116,7 @@ class UpdaterHandler:
             devices = self._read_devices()
             if devices.empty:
                 log.warning("No devices to update")
-                return True
+                return pd.DataFrame()
             ssh = SshHandler()
             df_interfaces = pd.DataFrame()
             with Progress() as progress:
@@ -204,9 +205,7 @@ class UpdaterHandler:
                 log.info("No changes to update")
             else:
                 change_controller = ChangeController()
-                status_operation = change_controller.new_interfaces(data)
-                if status_operation.status != 201:
-                    raise Exception(status_operation.message)
+                change_controller.new_interfaces(data)
                 log.info("Changes updated")
             return True
         except Exception as error:
@@ -221,9 +220,7 @@ class UpdaterHandler:
                 log.info("No interfaces to update")
             else:
                 interface_controller = InterfaceController()
-                status_operation = interface_controller.new_interfaces(data)
-                if status_operation.status != 201:
-                    raise Exception(status_operation.message)
+                interface_controller.new_interfaces(data)
                 log.info("Interfaces updated")
             return True
         except Exception as error:

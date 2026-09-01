@@ -1,6 +1,7 @@
+from fastapi import status as http_status
 from icm.constants import RoleTypes
 from icm.utils import Configuration, log
-from icm.business.libs.code import ResponseCode
+from icm.business.exceptions import BusinessError
 from icm.business.models.configuration import NewConfigModel
 
 
@@ -8,24 +9,23 @@ class ConfigController:
     """Class to manage config controller."""
 
     @staticmethod
-    def get_config() -> NewConfigModel | None:
+    def get_config() -> NewConfigModel:
         """Get config."""
         try:
             configuration = Configuration()
-            configuration = NewConfigModel(
+            return NewConfigModel(
                 can_assign=configuration.system.can_assign.model_dump(),
                 can_receive_assignment=configuration.system.can_receive_assignment.model_dump(),
                 view_information_global=configuration.system.view_information_global.model_dump(),
-                notification_changes=configuration.system.notification_changes.model_dump()
+                notification_changes=configuration.system.notification_changes.model_dump(),
             )
-            return configuration
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Config controller error. Failed to get config. {error}")
-            return None
-        
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to get configuration")
+
     @staticmethod
-    def new_config(new_config: NewConfigModel) -> ResponseCode:
+    def new_config(new_config: NewConfigModel) -> None:
         """Create new config."""
         try:
             configuration = Configuration()
@@ -35,14 +35,13 @@ class ConfigController:
                 view_information_global=new_config.view_information_global,
                 notification_changes=new_config.notification_changes
             )
-            if status_operation: 
-                configuration.read_config_system()
-                return ResponseCode(status=200)
-            else: raise Exception("Failed to save the new configuration")
+            if not status_operation:
+                raise Exception("Failed to save the new configuration")
+            configuration.read_config_system()
         except Exception as error:
             error = str(error).strip().capitalize()
             log.error(f"Config controller error. Failed to create config. {error}")
-            return ResponseCode(status=500, message=error)
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to save the new configuration")
         
     @staticmethod
     def can_assign_permission(role: str) -> bool:

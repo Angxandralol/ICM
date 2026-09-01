@@ -1,16 +1,17 @@
 import jwt
 from typing import Annotated
 from datetime import datetime, timedelta, timezone
-from fastapi import Depends
+from fastapi import Depends, status as http_status
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from icm.access import UserQuery
 from icm.utils import Configuration, log
-from icm.business.models.token import TokenData
+from icm.business.exceptions import BusinessError
 from icm.business.models.user import UserModel
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+MINIMUM_SECRET_KEY_LENGTH = 32
 
 
 class SecurityController:
@@ -22,6 +23,8 @@ class SecurityController:
 
     def __init__(self):
         config = Configuration()
+        if len(config.key) < MINIMUM_SECRET_KEY_LENGTH:
+            raise BusinessError(http_status.HTTP_500_INTERNAL_SERVER_ERROR, "SECRET_KEY configuration is too weak")
         self._key = config.key
 
     def _verify_password(self, password: str, hashed_password: str) -> bool:
@@ -92,23 +95,25 @@ class SecurityController:
         return self._pwd_context.hash(password)
         
     @staticmethod
-    async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> UserModel | None:
+    def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> UserModel:
         """Get the current user from the token.
-        
+
         Parameters
         ----------
         token : Annotated[str, Depends(oauth2_scheme)]
             Token to get current user.
         """
+        credentials_error = BusinessError(http_status.HTTP_401_UNAUTHORIZED, "Could not validate credentials")
         try:
             security = SecurityController()
             payload = jwt.decode(token, security._key, algorithms=[security._algorithm])
             username = payload.get("sub")
-            if username is None: return None
-            token = TokenData(username=username)
-            user = security._get_user(username=username)
-            if not user: None
-            return user
         except Exception as error:
-            log.error(f"Security access error. Failed to get current user. {error}")
-            return None
+            log.error(f"Security access error. Failed to decode token. {error}")
+            raise credentials_error
+        if username is None:
+            raise credentials_error
+        user = security._get_user(username=username)
+        if not user:
+            raise credentials_error
+        return user
