@@ -38,7 +38,7 @@ urls = { Homepage = "https://github.com/xanv754/Interface-Change-Monitor" }
 icm = "icm.__main__:cli"
 
 [project.optional-dependencies]
-dev = ["black", "pytest>=8.0.0"]
+dev = ["black", "httpx>=0.27.0", "pytest>=8.0.0"]
 
 [tool.setuptools]
 packages = ["icm"]
