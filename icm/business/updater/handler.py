@@ -35,9 +35,8 @@ class UpdaterHandler:
                 data.to_csv(tmp_path, index=False, sep=";")
                 log.info(f"Consults of {self.date_consult} saved in tmp folder")
             return True
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to save consults. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to save consults.")
             return False
 
     def _load_tmp(self) -> pd.DataFrame:
@@ -65,9 +64,8 @@ class UpdaterHandler:
                     InterfaceField.CONSULTED_AT,
                 ]
             ]
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to load consults. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to load consults.")
             return pd.DataFrame()
         else:
             return data
@@ -85,9 +83,8 @@ class UpdaterHandler:
                 names=[InterfaceField.IP, InterfaceField.COMMUNITY],
             )
             return data
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to read devices. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to read devices.")
             return pd.DataFrame()
 
     def _worker(self, row: pd.Series) -> pd.DataFrame:
@@ -102,9 +99,8 @@ class UpdaterHandler:
             else:
                 log.info(f"{ip} is not alive")
                 return pd.DataFrame()
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to update device. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to update device.")
             return pd.DataFrame()
 
     def _execute_consults(self) -> pd.DataFrame:
@@ -165,11 +161,8 @@ class UpdaterHandler:
             df_interfaces = df_interfaces.reset_index(drop=True)
             ssh.disconnect()
             self._export_consults(data=df_interfaces)
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(
-                f"Updater handler error. Failed to execute SNMP consults. {error}"
-            )
+        except Exception:
+            log.exception("Updater handler error. Failed to execute SNMP consults.")
             return pd.DataFrame()
         else:
             return df_interfaces
@@ -191,10 +184,9 @@ class UpdaterHandler:
             else:
                 log.info("No changes in the interfaces found")
             return changes
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(
-                f"Updater handler error. Failed to compare information of interfaces. {error}"
+        except Exception:
+            log.exception(
+                "Updater handler error. Failed to compare information of interfaces."
             )
             return pd.DataFrame()
 
@@ -208,9 +200,8 @@ class UpdaterHandler:
                 change_controller.new_interfaces(data)
                 log.info("Changes updated")
             return True
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to update changes. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to update changes.")
             return False
 
     def _update_interfaces(self, data: pd.DataFrame) -> bool:
@@ -223,9 +214,8 @@ class UpdaterHandler:
                 interface_controller.new_interfaces(data)
                 log.info("Interfaces updated")
             return True
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to update interfaces. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to update interfaces.")
             return False
 
     def update(self) -> bool:
@@ -248,9 +238,8 @@ class UpdaterHandler:
                         log.error("Problems to get new interfaces to compare")
                     return True
             return False
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to update devices. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to update devices.")
             return False
 
     def reload_changes(self) -> bool:
@@ -266,7 +255,6 @@ class UpdaterHandler:
                 log.error("Try to reload changes but not updated")
                 return False
             return True
-        except Exception as error:
-            error = str(error).strip().capitalize()
-            log.error(f"Updater handler error. Failed to reload changes. {error}")
+        except Exception:
+            log.exception("Updater handler error. Failed to reload changes.")
             return False

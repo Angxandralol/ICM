@@ -16,3 +16,8 @@ class AssignmentStatusTypes:
     INSPECTED = "INSPECTED"
     REDISCOVERED = "REDISCOVERED"
     EQUIPMENT_DOWN = "EQUIPMENT_DOWN"
+
+
+class SnmpModeTypes:
+    LEGACY = "legacy"
+    MODERN = "modern"

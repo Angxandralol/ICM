@@ -2,6 +2,7 @@ import paramiko
 import threading
 import time
 from icm.utils import Configuration, log
+from icm.business.updater.constants import SSH_CONNECT_TIMEOUT_SECONDS
 
 
 class SshHandler:
@@ -30,6 +31,7 @@ class SshHandler:
             self._initialized = True
 
     def _ssh_jump(self) -> None:
+        """Connect through the chain of SSH jump hosts, cleaning up any partial jump on failure."""
         try:
             credentials = self._config.system.snmp.credentials
             sock: paramiko.Channel | None = None
@@ -43,6 +45,9 @@ class SshHandler:
                     hostname=credential.host,
                     port=credential.port,
                     sock=sock,
+                    timeout=SSH_CONNECT_TIMEOUT_SECONDS,
+                    banner_timeout=SSH_CONNECT_TIMEOUT_SECONDS,
+                    auth_timeout=SSH_CONNECT_TIMEOUT_SECONDS,
                 )
                 self._client.append(client)
                 if i == jumps:
@@ -54,8 +59,10 @@ class SshHandler:
                 dest_addr = (next_credential.host, next_credential.port)
                 local_addr = ("127.0.0.1", 0)
                 sock = transport.open_channel("direct-tcpip", dest_addr, local_addr)
-        except Exception as error:
-            log.error(f"SSH Connection: Failed SSH jump to connect - {error}")
+        except Exception:
+            while self._client:
+                self._client.pop().close()
+            raise
 
     def get_client(self) -> paramiko.SSHClient:
         return self._client[-1]
@@ -74,9 +81,9 @@ class SshHandler:
         except ValueError as error:
             self.isConnected = False
             log.error(f"SSH Connection - {error}")
-        except Exception as error:
+        except Exception:
             self.isConnected = False
-            log.error(f"SSH Connection: Failed to connect to server - {error}")
+            log.exception("SSH Connection: Failed to connect to server")
 
     def disconnect(self) -> None:
         try:
@@ -84,7 +91,7 @@ class SshHandler:
                 while len(self._client) > 0:
                     client = self._client.pop()
                     client.close()
-        except Exception as error:
-            log.error(f"SSH Connection: Failed to disconnect from server - {error}")
+        except Exception:
+            log.exception("SSH Connection: Failed to disconnect from server")
         else:
             self.isConnected = False

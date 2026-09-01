@@ -8,5 +8,5 @@ from icm.constants.fields import (
     ChangeField,
     ChangeAssignField
 )
-from icm.constants.types import RoleTypes, UserStatusTypes, AssignmentStatusTypes
+from icm.constants.types import RoleTypes, UserStatusTypes, AssignmentStatusTypes, SnmpModeTypes
 from icm.constants.values import EMPTY_FIELD_PLACEHOLDER

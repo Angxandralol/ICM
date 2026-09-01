@@ -4,6 +4,7 @@ import random
 import string
 from pydantic import BaseModel
 from dotenv import load_dotenv, dotenv_values
+from icm.constants import SnmpModeTypes
 from icm.utils.log import log
 
 
@@ -23,6 +24,7 @@ class ConfigSnmpCredentials(BaseModel):
 
 
 class ConfigSnmp(BaseModel):
+    mode: str = SnmpModeTypes.LEGACY
     commands: ConfigCommands
     credentials: list[ConfigSnmpCredentials]
 
@@ -57,6 +59,7 @@ HOST_FRONTEND = "HOST_FRONTEND"
 SYSTEM_FILENAME = "system.json"
 CONFIG_SYSTEM_BASE = ConfigModel(
     snmp=ConfigSnmp(
+        mode=SnmpModeTypes.LEGACY,
         commands=ConfigCommands(ping="ping", snmp="snmpwalk"),
         credentials=[
             ConfigSnmpCredentials(
